@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Models (Users should download these)
+*.pt
+*.engine
+*.onnx
+
+# Data (Don't commit large datasets)
+data/samples/frames/
+data/samples/*.mp4
+!data/samples/README.md
+
+# Logs and benchmarks
+*.log
+benchmark_results.csv
+
+# VS Code
+.vscode/

@@ -1,0 +1,26 @@
+# Indian Driving Dataset (IDD) Configuration
+# Website: http://idd.insaan.iiit.ac.in/
+# This dataset captures unstructured Indian traffic (Auto-rickshaws, animals, faded lanes).
+
+path: ../datasets/IDD_Detection
+train: images/train
+val: images/val
+test: images/test
+
+# IDD Class Names (Detection Subset)
+names:
+  0: bicycle
+  1: bus
+  2: traffic sign
+  3: train
+  4: motorcycle
+  5: car
+  6: autorickshaw
+  7: truck
+  8: traffic light
+  9: rider
+  10: person
+  11: animal
+  12: caravan
+  13: trailer
+  14: fallback_like_drivable_area
