@@ -13,7 +13,18 @@
 
 **"Bridging the Gap: Bringing Autonomous Perception to the Chaos of Indian Streets."**
 
-![System Architecture Comparison](data/assets/v1_vs_v2_comparison.png)
+![ADAS Dashboard](data/assets/adas_dashboard.png)
+
+```mermaid
+graph LR
+    Camera[Camera Feed] --> Pre[Pre-Process]
+    Pre --> Switch{Keyframe?}
+    Switch -- Yes --> AI[Deep Inference]
+    Switch -- No --> Track[Optical Flow]
+    AI --> Fuse[Temporal Fusion]
+    Track --> Fuse
+    Fuse --> UI[Dashboard Overlay]
+```
 
 </div>
 
@@ -52,6 +63,23 @@ Deep Learning is heavy. To run this on Edge Hardware (Jetson), I designed a **Ke
 *   **Perception**: `Ultralytics YOLOv8`, `HuggingFace SegFormer`.
 *   **Optimization**: `TensorRT` (INT8 Quantization), `Sparse Optical Flow`.
 *   **Deployment**: `ROS 2` Node (Humble), `Docker`.
+
+---
+
+## ⚡ Jetson Deployment (TensorRT)
+To achieve **<18ms latency** on Jetson Orin/Xavier, we convert PyTorch weights to INT8 Engines.
+
+### 1. Auto-Optimization Script
+We provide a utility to handle SegFormer & YOLO conversion:
+```bash
+python -m src.utils.model_optimization
+```
+
+### 2. Manual Export (YOLOv8)
+```bash
+# Export to TensorRT Engine with FP16 speedup
+yolo export model=yolov8n.pt format=engine device=0 half=True
+```
 
 ---
 
