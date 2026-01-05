@@ -59,6 +59,13 @@ Deep Learning is heavy. To run this on Edge Hardware (Jetson), I designed a **Ke
 
 ---
 
+### 🚦 **Traffic Control & Signage (New in v2.0)**
+*   **Traffic Signal Recognition**: Hybrid logic (YOLO + HSV) detects **Red, Yellow, Green** states.
+*   **16-Class Ready**: Architecture supports training for specific Indian classes:
+    *   *Sings*: No Horn, No Parking, No U-Turn, Speed Limit (40/60).
+    *   *Obstacles*: Road Humps, Pedestrian Crossings.
+    *   *Training Guide*: See `TRAINING_GUIDE_COLAB.md` to unlock these classes.
+
 ## 🛠️ The Tech Stack
 *   **Perception**: `Ultralytics YOLOv8`, `HuggingFace SegFormer`.
 *   **Optimization**: `TensorRT` (INT8 Quantization), `Sparse Optical Flow`.

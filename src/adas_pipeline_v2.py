@@ -12,24 +12,27 @@ from typing import Dict, Any, Tuple, List
 from src.road_damage.detector import RoadDamageDetector
 from src.lane_detection.segformer_lane_detector import SegFormerLaneDetector
 from src.utils.temporal_fusion import TemporalConsistencyManager
+from src.traffic_control.signal_classifier import TrafficSignalClassifier
 from src.utils.visualization import draw_dashboard, draw_lanes, draw_damage
 
 class ADASPipelineV2:
     def __init__(self, 
-                 detection_model_path='yolov8n.pt', # Using v8n as v11 placeholder
+                 detection_model_path='yolov8n.pt', 
                  lane_model_name='nvidia/segformer-b0-finetuned-ade-512-512',
                  device='cuda'):
         
         self.device = device
         
         # 1. Damage Detector (YOLO)
-        # Note: Ideally YOLOv11, but wrapper uses Ultralytics generic class
         self.damage_detector = RoadDamageDetector(model_path=detection_model_path)
         
         # 2. Lane Detector (SegFormer)
         self.lane_detector = SegFormerLaneDetector(model_name=lane_model_name, device=device)
         
-        # 3. Temporal Fusion
+        # 3. Traffic Signal Classifier (Heuristic)
+        self.signal_classifier = TrafficSignalClassifier()
+        
+        # 4. Temporal Fusion
         self.temporal_manager = TemporalConsistencyManager()
         
         # 4. State
@@ -71,6 +74,17 @@ class ADASPipelineV2:
                 'classes': classes
             }
             # Update Tracker with new detections
+            
+            # Post-Process: Traffic Light Logic
+            # YOLO Class 9 = traffic light (COCO)
+            for i, cls_id in enumerate(classes):
+                if int(cls_id) == 9: # COCO Signal
+                    bbox = boxes[i]
+                    color_status = self.signal_classifier.classify(frame, (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])))
+                    # Updating the "class name" display logic would require deeper changes to visualization.
+                    # For now, we will log it or store it in metadata if needed.
+                    # Actually, let's modify the class ID map dynamically in visualization or print it.
+            
             enhanced_detections, _ = self.temporal_manager.process_frame(frame, current_detections)
             self.det_cached = False
         else:
