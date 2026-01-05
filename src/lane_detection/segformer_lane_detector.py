@@ -105,15 +105,25 @@ class SegFormerLaneDetector:
         
         # Create Binary Road Mask
         # We only want Class 6 (Road). 
-        # Note: SegFormer argmax ensures exclusivity (if it's Car, it's NOT Road).
         lane_mask = np.zeros_like(pred_seg)
+        # ADE20K Road=6. Also include Sidewalk=12 (sometimes road edges are sidewalk)
         lane_mask[pred_seg == 6] = 255 
+        lane_mask[pred_seg == 12] = 255 
         
+        # Debug: Check if we see anything
+        road_pixels = cv2.countNonZero(lane_mask)
+        if road_pixels < 100:
+            logger.warning(f"Low road pixels detected: {road_pixels}. Unique classes: {np.unique(pred_seg)}")
+            
         # Region of Interest Filter (Remove sky/horizon noise)
         roi_mask = np.zeros_like(lane_mask)
         # Only bottom 50%
         roi_mask[int(h*0.5):, :] = 255
         lane_mask = cv2.bitwise_and(lane_mask, roi_mask)
+        
+        # Dilate mask to close gaps (important for dashed lines/poor segmentation)
+        kernel = np.ones((5,5), np.uint8)
+        lane_mask = cv2.dilate(lane_mask, kernel, iterations=1)
         
         # Find Edges of the Road (The Lanes)
         edges = cv2.Canny(lane_mask, 100, 200)
@@ -157,7 +167,7 @@ class SegFormerLaneDetector:
         y_idxs, x_idxs = np.nonzero(mask)
         
         # Need enough points to fit
-        if len(y_idxs) < 50:
+        if len(y_idxs) < 10: # Relaxed from 50
             return [], []
             
         try:
