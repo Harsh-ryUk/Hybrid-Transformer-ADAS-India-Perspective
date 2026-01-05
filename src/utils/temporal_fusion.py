@@ -46,7 +46,7 @@ class TemporalConsistencyManager:
         # 1. Initialize logic on first frame
         if self.prev_gray is None:
             self.prev_gray = gray
-            self.history.append(current_detections)
+            
             # Initialize tracking IDs for all current
             tracking_ids = []
             for i in range(len(current_detections['boxes'])):
@@ -61,6 +61,9 @@ class TemporalConsistencyManager:
             enhanced = current_detections.copy()
             enhanced['tracking_ids'] = tracking_ids
             enhanced['consecutive_frames'] = [1]*len(tracking_ids)
+            
+            # Fix: Append enhanced (with IDs) to history
+            self.history.append(enhanced)
             return enhanced, {}
 
         # 2. Compute Optical Flow (Dense DIS for robustness or Sparse for speed)
