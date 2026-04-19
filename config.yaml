@@ -1,0 +1,178 @@
+# =============================================================================
+# ADAS Level 4 — India-Focused Configuration
+# =============================================================================
+
+system:
+  name: "ADAS-L4-India"
+  version: "4.0.0"
+  device: "cuda"           # cuda or cpu
+  target_fps: 20
+  log_level: "INFO"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Perception — Object Detection
+# ─────────────────────────────────────────────────────────────────────────────
+detection:
+  model_path: "yolov8n.pt"
+  confidence_threshold: 0.35
+  iou_threshold: 0.45
+  input_size: [640, 640]
+
+  # India-specific class mapping from COCO indices
+  india_classes:
+    vehicles: [2, 3, 5, 7]          # car, motorcycle, bus, truck
+    vulnerable_road_users: [0, 1]    # person, bicycle
+    animals: [15, 16, 17, 18, 19, 20, 21, 22, 23]  # COCO animal classes
+    traffic_infrastructure: [9]      # traffic light
+
+  # Per-category confidence thresholds (lower for safety-critical)
+  category_thresholds:
+    vehicles: 0.40
+    vulnerable_road_users: 0.25
+    animals: 0.20
+    traffic_infrastructure: 0.35
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Perception — Zero-Shot Detection (OWLv2)
+# ─────────────────────────────────────────────────────────────────────────────
+zero_shot:
+  enabled: true
+  model_name: "google/owlv2-base-patch16-ensemble"
+  text_queries:
+    - "auto-rickshaw"
+    - "cow on road"
+    - "stray dog"
+    - "overloaded truck"
+    - "handcart on road"
+    - "tractor"
+    - "cycle-rickshaw"
+  confidence_threshold: 0.15
+  run_every_n_frames: 10           # Heavy model — run infrequently
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Perception — Lane & Drivable Area Segmentation
+# ─────────────────────────────────────────────────────────────────────────────
+segmentation:
+  model_name: "nvidia/segformer-b0-finetuned-ade-512-512"
+  input_size: [512, 512]
+  road_class_ids: [6, 12]          # ADE20K: road=6, sidewalk=12
+  drivable_area_threshold: 100     # Min pixels to consider valid
+  use_clahe: true                  # Adaptive contrast for monsoon/night
+  roi_top_fraction: 0.45           # Ignore top 45% (sky)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tracking — DeepSORT
+# ─────────────────────────────────────────────────────────────────────────────
+tracking:
+  max_age: 30                       # Frames to keep lost track alive
+  min_hits: 3                       # Hits before track is confirmed
+  iou_threshold: 0.3                # Association IoU threshold
+  max_cosine_distance: 0.4          # Appearance feature matching
+  nn_budget: 100                    # Gallery size per track
+  use_appearance: false             # Set true if Re-ID model available
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Decision-Making — Rule Engine
+# ─────────────────────────────────────────────────────────────────────────────
+decision:
+  # Distance thresholds (in pixels — proxy for meters)
+  emergency_brake_distance: 80      # Very close object
+  hard_brake_distance: 150
+  soft_brake_distance: 250
+  slow_down_distance: 400
+
+  # Lane discipline
+  lane_departure_threshold: 50      # Pixels from lane center
+
+  # Crowd detection
+  crowd_density_threshold: 5        # Objects in ego zone = crowded
+  crowd_speed_factor: 0.5           # Reduce speed by 50%
+
+  # Speed parameters (simulation units)
+  max_speed: 40.0
+  cruise_speed: 30.0
+  slow_speed: 15.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Anomaly Detection
+# ─────────────────────────────────────────────────────────────────────────────
+anomaly:
+  # Wrong-side driving detection
+  wrong_side_velocity_threshold: -5.0   # Negative = opposite direction
+  wrong_side_min_frames: 3              # Consecutive frames to confirm
+
+  # Sudden crossing
+  crossing_velocity_threshold: 15.0     # Lateral velocity spike
+  crossing_proximity_threshold: 200     # Pixel proximity to ego
+
+  # Animal on road
+  animal_in_drivable_area: true
+
+  # Road surface anomaly
+  pothole_contrast_threshold: 40
+  pothole_min_area: 500
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CARLA Simulation
+# ─────────────────────────────────────────────────────────────────────────────
+carla:
+  host: "localhost"
+  port: 2000
+  timeout: 10.0
+  town: "Town03"                    # Town03 has urban roads similar to Indian cities
+  weather: "ClearNoon"
+  ego_vehicle: "vehicle.tesla.model3"
+
+  camera:
+    width: 1280
+    height: 720
+    fov: 110
+    position: [1.5, 0.0, 2.4]      # x, y, z relative to vehicle
+    rotation: [0.0, 0.0, 0.0]      # pitch, yaw, roll
+
+  traffic:
+    num_vehicles: 30
+    num_pedestrians: 20
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Datasets — India-Focused
+# ─────────────────────────────────────────────────────────────────────────────
+datasets:
+  idd:
+    name: "Indian Driving Dataset (IDD)"
+    url: "http://idd.insaan.iiit.ac.in/"
+    classes: 30
+    description: "10K images from Indian roads with 30 label classes including auto-rickshaw, animal, road-side structures"
+
+  bdd100k:
+    name: "BDD100K"
+    url: "https://bdd-data.berkeley.edu/"
+    classes: 10
+    description: "100K dashcam video frames with detection/segmentation annotations"
+
+  mapillary:
+    name: "Mapillary Vistas"
+    url: "https://www.mapillary.com/dataset/vistas"
+    classes: 66
+    description: "25K street-level images with fine-grained segmentation (66 classes)"
+
+  custom:
+    description: "Indian dashcam footage from YouTube, annotated with CVAT"
+    special_classes:
+      - "auto-rickshaw"
+      - "cow"
+      - "buffalo"
+      - "stray-dog"
+      - "overloaded-truck"
+      - "handcart"
+      - "tractor"
+      - "cycle-rickshaw"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Evaluation Metrics
+# ─────────────────────────────────────────────────────────────────────────────
+evaluation:
+  detection_iou_threshold: 0.5
+  tracking_iou_threshold: 0.5
+  fps_target: 20
+  decision_latency_target_ms: 50

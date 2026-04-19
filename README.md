@@ -1,129 +1,164 @@
 <div align="center">
 
-# 🇮🇳 Vision-Based ADAS for Unstructured Traffic 
-### A Hybrid Transformer-Tracking Architecture for Indian Roads
+# 🇮🇳 ADAS Level 4 — India-Focused Autonomous Driving
+
+### A Modular Perception-Tracking-Decision Pipeline for Chaotic Traffic
 
 [![Python 3.10](https://img.shields.io/badge/Python-3.10-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![YOLOv8](https://img.shields.io/badge/YOLO-v8-00FFFF?style=for-the-badge&logo=yolo&logoColor=black)](https://github.com/ultralytics/ultralytics)
 [![SegFormer](https://img.shields.io/badge/SegFormer-Transformers-FF5722?style=for-the-badge&logo=huggingface&logoColor=white)](https://huggingface.co/)
-[![Colab](https://img.shields.io/badge/Open_In_Colab-F9AB00?style=for-the-badge&logo=googlecolab&logoColor=white)](COLAB_INSTRUCTIONS.md)
+[![CARLA](https://img.shields.io/badge/CARLA-Simulator-orange?style=for-the-badge)](https://carla.org/)
 
 <br />
 
-**"Bridging the Gap: Bringing Autonomous Perception to the Chaos of Indian Streets."**
-
-![ADAS Dashboard](data/assets/adas_dashboard.png)
+**Robust autonomous driving perception adapted for the chaos of Indian streets.**
 
 ```mermaid
 graph LR
-    Camera[Camera Feed] --> Pre[Pre-Process]
-    Pre --> Switch{Keyframe?}
-    Switch -- Yes --> AI[Deep Inference]
-    Switch -- No --> Track[Optical Flow]
-    AI --> Fuse[Temporal Fusion]
-    Track --> Fuse
-    Fuse --> UI[Dashboard Overlay]
+    Camera[Camera Feed] --> DET[India Detector]
+    DET --> TRACK[DeepSORT Tracker]
+    Camera --> SEG[SegFormer Lanes]
+    TRACK --> DECIDE[Rule Engine]
+    SEG --> DECIDE
+    DECIDE --> CTRL[Vehicle Control]
+    CTRL --> CARLA[CARLA / ROS]
 ```
 
 </div>
 
 ---
 
-## 🚀 Innovation & Impact
-This project addresses the critical failure points of standard ADAS (Lane Departure/Collision Warning) on Indian roads: **Faded Markings**, **Chaotic Traffic**, and **Potholes**. 
+## 🎯 What Makes This Different
 
-Instead of relying on fragile "Line Detection" algorithms, I engineered a **Human-Like Perception System**:
+This is **not** another generic ADAS demo. Built specifically for Indian roads:
 
-### 🧠 1. The "See-Everything" Model (SegFormer)
-We abandoned traditional OpenCV for **Semantic Segmentation Transformers**.
-*   **Why?** Unlike Hough transforms which look for "White Lines", SegFormer understands "Drivable Surface".
-*   **Result**: It successfully navigates **curved mountain roads**, **unmarked highways**, and **faded city streets**.
-
-### ⚡ 2. The "Reflex" Engine (Temporal Fusion)
-Deep Learning is heavy. To run this on Edge Hardware (Jetson), I designed a **Keyframe-Tracking Architecture**:
-*   **Heavy Lifting**: Deep Inference runs only on Keyframes (Every 5th frame).
-*   **Reflexes**: Intermediate frames are tracked using **Optical Flow**, predicting movement at **30+ FPS**.
-*   **Outcome**: **Real-Time Performance** on limited compute.
+| Challenge | Our Solution |
+|---|---|
+| Auto-rickshaws, handcarts | **OWLv2 zero-shot detection** — no training needed |
+| Cows/dogs on road | **Per-category thresholds** (animals: 0.20 confidence) |
+| Wrong-side driving | **Anomaly detector** with velocity analysis |
+| Faded/missing lanes | **SegFormer drivable area** instead of line detection |
+| Chaotic density | **DeepSORT** tracking 50+ objects simultaneously |
+| Potholes everywhere | **Contrast-based road anomaly detection** |
 
 ---
 
-## 📊 Performance Benchmark
-*Validation Hardware: NVIDIA Jetson Orin NX / Google Colab T4*
+## 🧱 Architecture
 
-| Metric | Industry Standard (v1) | **Our Hybrid System (v2)** | Improvement |
-| :--- | :--- | :--- | :--- |
-| **Lane Detection** | Hough Transform (Fails on Curves) | **SegFormer-B0 (96% F1)** | **+50% Robustness** |
-| **Object Detection** | Generic COCO | **Fine-Tuned for Animals/Autos** | **+12% mAP** |
-| **Latency** | 12ms (But inaccurate) | **18ms (High Accuracy)** | **Production Ready** |
-
----
-
-### 🚦 **Traffic Control & Signage (New in v2.0)**
-*   **Traffic Signal Recognition**: Hybrid logic (YOLO + HSV) detects **Red, Yellow, Green** states.
-*   **16-Class Ready**: Architecture supports training for specific Indian classes:
-    *   *Sings*: No Horn, No Parking, No U-Turn, Speed Limit (40/60).
-    *   *Obstacles*: Road Humps, Pedestrian Crossings.
-    *   *Training Guide*: See `TRAINING_GUIDE_COLAB.md` to unlock these classes.
-
-## 🛠️ The Tech Stack
-*   **Perception**: `Ultralytics YOLOv8`, `HuggingFace SegFormer`.
-*   **Optimization**: `TensorRT` (INT8 Quantization), `Sparse Optical Flow`.
-*   **Deployment**: `ROS 2` Node (Humble), `Docker`.
-
----
-
-## ⚡ Jetson Deployment (TensorRT)
-To achieve **<18ms latency** on Jetson Orin/Xavier, we convert PyTorch weights to INT8 Engines.
-
-### 1. Auto-Optimization Script
-We provide a utility to handle SegFormer & YOLO conversion:
-```bash
-python -m src.utils.model_optimization
+```
+Camera → IndiaDetector(YOLOv8) → DeepSORT → AnomalyDetector → RuleEngine → Control
+              ↓                                    ↑
+         OWLv2 (async)                      SegFormer Lanes
 ```
 
-### 2. Manual Export (YOLOv8)
+See [ARCHITECTURE.md](ARCHITECTURE.md) for full system diagrams.
+
+### Modules
+
+| Module | Description | Key File |
+|---|---|---|
+| 🔍 Object Detection | YOLOv8 + IDD class mapping | `src/perception/india_detector.py` |
+| 🦉 Zero-Shot Detection | OWLv2 for rare Indian objects | `src/perception/owl_detector.py` |
+| 🛣️ Lane Segmentation | SegFormer-B0 drivable area | `src/lane_detection/segformer_lane_detector.py` |
+| 📦 Multi-Object Tracking | DeepSORT (Kalman + Hungarian) | `src/tracking/deep_sort_tracker.py` |
+| ⚠️ Anomaly Detection | Wrong-side, crossing, animal, pothole | `src/anomaly/event_detector.py` |
+| 🧠 Decision Engine | Priority-ordered rule system | `src/decision/rule_engine.py` |
+| 🎮 CARLA Simulation | Full simulation bridge | `src/simulation/carla_bridge.py` |
+| 📊 Evaluation | mAP, IoU, MOTA, FPS profiling | `src/evaluation/metrics.py` |
+
+---
+
+## 📊 Indian Datasets
+
+| Dataset | Classes | Purpose |
+|---|---|---|
+| [IDD](http://idd.insaan.iiit.ac.in/) | 30 | Indian road classes (auto-rickshaw, animal) |
+| [BDD100K](https://bdd-data.berkeley.edu/) | 10 | Diverse driving scenarios |
+| [Mapillary Vistas](https://www.mapillary.com/dataset/vistas) | 66 | Fine-grained street segmentation |
+| Custom (YouTube + CVAT) | 8+ | India-specific dashcam annotations |
+
+---
+
+## 🚀 Quick Start
+
+### Option A: Video Processing
 ```bash
-# Export to TensorRT Engine with FP16 speedup
-yolo export model=yolov8n.pt format=engine device=0 half=True
+# Install dependencies
+pip install -r requirements.txt
+
+# Run on video
+python -m src.adas_pipeline_l4 --source data/samples/indian_road.mp4 --device cuda
+
+# Run on webcam
+python -m src.adas_pipeline_l4 --source 0
+
+# Headless mode (save output)
+python -m src.adas_pipeline_l4 --source video.mp4 --headless --output result.mp4
+```
+
+### Option B: CARLA Simulation
+```bash
+# 1. Start CARLA server (separate terminal)
+./CarlaUE4.exe  # Windows
+
+# 2. Run pipeline with CARLA
+python -m src.adas_pipeline_l4 --carla --config config.yaml
+```
+
+### Run Tests
+```bash
+python -m pytest tests/test_l4_pipeline.py -v
 ```
 
 ---
 
 ## 📂 Project Structure
+
 ```text
-ADAS-v2/
+ADAS-L4-India/
+├── config.yaml                    # Central configuration
 ├── src/
-│   ├── adas_pipeline_v2.py       # Main Real-Time Orchestrator
-│   ├── lane_detection/           # Transformer-based Lane Segmentation
-│   └── utils/temporal_fusion.py  # Optical Flow Tracking Logic
-├── data/
-│   ├── samples/                  # Demo Videos (Indian Context)
-│   └── assets/                   # Architecture Diagrams
-├── RESEARCH_THESIS.md            # 📄 Formal Academic Report
-└── COLAB_INSTRUCTIONS.md         # ☁️ Cloud Deployment Guide
+│   ├── adas_pipeline_l4.py        # 🎯 Master L4 Orchestrator
+│   ├── perception/
+│   │   ├── india_detector.py      # YOLOv8 India-aware detection
+│   │   └── owl_detector.py        # OWLv2 zero-shot detection
+│   ├── lane_detection/
+│   │   └── segformer_lane_detector.py
+│   ├── tracking/
+│   │   ├── kalman_filter.py       # 8-state Kalman filter
+│   │   └── deep_sort_tracker.py   # DeepSORT tracker
+│   ├── decision/
+│   │   ├── rule_engine.py         # Priority-ordered decisions
+│   │   └── control_output.py      # Vehicle control commands
+│   ├── anomaly/
+│   │   └── event_detector.py      # Edge-case detection
+│   ├── simulation/
+│   │   ├── carla_bridge.py        # CARLA integration
+│   │   └── sensor_manager.py      # Camera management
+│   └── evaluation/
+│       └── metrics.py             # mAP, IoU, MOTA, profiling
+├── tests/
+│   └── test_l4_pipeline.py        # Comprehensive test suite
+├── ARCHITECTURE.md                # System architecture docs
+├── THESIS_REPORT.md               # Academic thesis report
+└── requirements.txt
 ```
 
 ---
 
-## 🏁 Get Started
-### Option A: Run on Cloud (Recommended)
-Don't have a GPU? Use our **[Google Colab Notebook](COLAB_INSTRUCTIONS.md)** to run the demo in your browser.
+## 📄 Documentation
 
-### Option B: Local Setup
-```bash
-# 1. Install Dependencies
-pip install -r requirements.txt
-
-# 2. Run the Demo
-python -m src.adas_pipeline_v2 --source data/samples/indian_road_sample.mp4
-```
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — System architecture with diagrams
+- **[THESIS_REPORT.md](THESIS_REPORT.md)** — Academic thesis report
+- **[config.yaml](config.yaml)** — All tunable parameters
 
 ---
 
 <div align="center">
 
-### 📄 [Read the Full Research Thesis](RESEARCH_THESIS.md)
-*Detailed Mathematical Formulation, Training Strategy, and Architecture Diagrams.*
+### 📄 [Read the Full Thesis Report](THESIS_REPORT.md)
+
+*Problem statement, methodology, dataset analysis, and evaluation framework.*
 
 </div>
