@@ -9,19 +9,33 @@ env/
 venv/
 ENV/
 
-# Models (Users should download these)
+# Models (download via ultralytics / HuggingFace)
 *.pt
 *.engine
 *.onnx
+*.safetensors
 
-# Data (Don't commit large datasets)
+# Data (don't commit large datasets or videos)
 data/samples/frames/
 data/samples/*.mp4
+data/idd_yolo/
+data/bdd100k_yolo/
+data/idd_segmentation/
+data/IDD_Detection/
+data/bdd100k/
+!data/README.md
 !data/samples/README.md
 
-# Logs and benchmarks
-*.log
+# Training runs & outputs
+runs/
 benchmark_results.csv
+*.log
 
-# VS Code
+# IDE
 .vscode/
+.idea/
+.pytest_cache/
+
+# OS
+Thumbs.db
+.DS_Store
