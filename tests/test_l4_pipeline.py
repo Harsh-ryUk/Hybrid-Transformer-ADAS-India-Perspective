@@ -4,6 +4,7 @@ Covers: detection, tracking, decision, anomaly, evaluation, and integration.
 """
 
 import unittest
+from unittest.mock import MagicMock
 import sys
 import os
 import numpy as np
@@ -148,6 +149,7 @@ class TestDecisionEngine(unittest.TestCase):
             emergency_brake_distance=80,
             hard_brake_distance=150,
             crowd_density_threshold=3,
+            danger_zone_polygon=[],
         )
 
     def test_cruise_on_clear_road(self):
@@ -220,6 +222,45 @@ class TestDecisionEngine(unittest.TestCase):
         decision = self.engine.decide(scene)
         self.assertEqual(decision.action, ActionType.SLOW_DOWN)
 
+    def test_danger_zone_polygon_stops(self):
+        danger_zone = [
+            (500, 720),
+            (780, 720),
+            (680, 400),
+            (600, 400)
+        ]
+        engine = RuleBasedDecisionEngine(
+            danger_zone_polygon=danger_zone
+        )
+        scene_inside = SceneContext(
+            tracked_objects=[{
+                "bbox": [600, 460, 680, 500], # bottom-center is at (640, 500)
+                "category": "vulnerable_road_users",
+                "class_name": "person"
+            }],
+            frame_width=1280,
+            frame_height=720
+        )
+        decision_inside = engine.decide(scene_inside)
+        self.assertEqual(decision_inside.action, ActionType.EMERGENCY_STOP)
+        self.assertEqual(decision_inside.control.brake, 1.0)
+        self.assertTrue(decision_inside.control.emergency_stop)
+
+        scene_outside = SceneContext(
+            tracked_objects=[{
+                "bbox": [260, 460, 340, 500], # bottom-center is at (300, 500)
+                "category": "vulnerable_road_users",
+                "class_name": "person"
+            }],
+            frame_width=1280,
+            frame_height=720
+        )
+        decision_outside = engine.decide(scene_outside)
+        self.assertNotEqual(decision_outside.action, ActionType.EMERGENCY_STOP)
+
+
+
+
 
 class TestAnomalyDetector(unittest.TestCase):
     """Test anomaly event detection."""
@@ -287,6 +328,27 @@ class TestAnomalyDetector(unittest.TestCase):
         events = self.detector.detect(tracks, drivable_mask=mask, frame_width=1280, frame_height=720)
         animal_events = [e for e in events if e.type == "animal_on_road"]
         self.assertGreater(len(animal_events), 0)
+
+    def test_wrong_side_detection_with_curved_mask(self):
+        """Simulate curved road mask where the road center is shifted to the left."""
+        mask = np.zeros((720, 1280), dtype=np.uint8)
+        # Road is shifted left: at y=250, road is from x=100 to x=500 -> center is 300
+        mask[200:300, 100:500] = 255
+
+        tracks = [{
+            "track_id": 4,
+            "bbox": [320, 200, 420, 300], # center cx = 370 (right of local road center 300)
+            "category": "vehicles",
+            "class_name": "car",
+            "velocity": [0, -10], # moving upward
+        }]
+
+        # Need multiple frames to confirm
+        for _ in range(3):
+            events = self.detector.detect(tracks, drivable_mask=mask, frame_width=1280, frame_height=720)
+
+        wrong_side = [e for e in events if e.type == "wrong_side_vehicle"]
+        self.assertGreater(len(wrong_side), 0)
 
     def test_reset(self):
         self.detector.reset()
@@ -419,6 +481,68 @@ class TestConfigLoading(unittest.TestCase):
 
         # Verify IDD URL
         self.assertIn("idd.insaan.iiit.ac.in", datasets["idd"]["url"])
+
+
+class TestOWLv2Detector(unittest.TestCase):
+    """Test OWLv2 zero-shot detector thresholds and filtering."""
+
+    def test_query_specific_thresholds(self):
+        from src.perception.owl_detector import OWLv2Detector
+        import src.perception.owl_detector as od
+
+        # Save original values
+        orig_loaded = od._owlv2_loaded
+        orig_processor = od._processor
+        orig_model = od._model
+
+        try:
+            od._owlv2_loaded = True
+            mock_processor = MagicMock()
+            mock_processor.return_value = {}
+            import torch
+            mock_processor.post_process_object_detection.return_value = [{
+                "boxes": torch.tensor([[10, 10, 20, 20], [30, 30, 40, 40], [50, 50, 60, 60], [70, 70, 80, 80]]),
+                "scores": torch.tensor([0.50, 0.35, 0.55, 0.25]),
+                "labels": torch.tensor([1, 1, 0, 5])
+            }]
+            mock_model = MagicMock()
+
+            od._processor = mock_processor
+            od._model = mock_model
+
+            queries = ["auto-rickshaw", "cow on road", "stray dog", "overloaded truck", "handcart on road", "tractor"]
+            query_thresholds = {
+                "cow on road": 0.45,
+                "auto-rickshaw": 0.60
+            }
+
+            detector = OWLv2Detector(
+                text_queries=queries,
+                confidence_threshold=0.20,
+                query_thresholds=query_thresholds,
+                device="cpu",
+                run_every_n_frames=1
+            )
+
+            dummy_frame = np.zeros((100, 100, 3), dtype=np.uint8)
+            results = detector.detect(dummy_frame, force=True)
+
+            mock_processor.post_process_object_detection.assert_called_once()
+            called_args, called_kwargs = mock_processor.post_process_object_detection.call_args
+            self.assertAlmostEqual(called_kwargs["threshold"], 0.20)
+
+            # We expect:
+            # - "cow on road" with score 0.50 (threshold 0.45)
+            # - "tractor" with score 0.25 (no query threshold, global threshold is 0.20)
+            # "auto-rickshaw" at 0.55 is filtered out because threshold is 0.60.
+            # "cow on road" at 0.35 is filtered out because threshold is 0.45.
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0].label, "cow on road")
+            self.assertEqual(results[1].label, "tractor")
+        finally:
+            od._owlv2_loaded = orig_loaded
+            od._processor = orig_processor
+            od._model = orig_model
 
 
 if __name__ == "__main__":

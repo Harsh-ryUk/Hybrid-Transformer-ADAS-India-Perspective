@@ -109,7 +109,7 @@ class AnomalyEventDetector:
         events = []
 
         # 1. Wrong-side driving detection
-        events.extend(self._detect_wrong_side(tracks, frame_width))
+        events.extend(self._detect_wrong_side(tracks, frame_width, drivable_mask))
 
         # 2. Sudden crossing detection
         events.extend(self._detect_sudden_crossing(tracks, frame_width, frame_height))
@@ -128,7 +128,10 @@ class AnomalyEventDetector:
         return events
 
     def _detect_wrong_side(
-        self, tracks: List[Dict], frame_width: int
+        self,
+        tracks: List[Dict],
+        frame_width: int,
+        drivable_mask: Optional[np.ndarray] = None,
     ) -> List[AnomalyEvent]:
         """
         Detect vehicles moving against expected traffic flow.
@@ -142,7 +145,6 @@ class AnomalyEventDetector:
         of the road), it may be wrong-side.
         """
         events = []
-        mid_x = frame_width / 2
 
         for track in tracks:
             category = track.get("category", "")
@@ -156,6 +158,18 @@ class AnomalyEventDetector:
             cx = (bbox[0] + bbox[2]) / 2
             vx = velocity[0] if len(velocity) > 0 else 0
             vy = velocity[1] if len(velocity) > 1 else 0
+
+            # Determine local midpoint of the road at this vehicle's vertical position
+            mid_x = frame_width / 2
+            if drivable_mask is not None:
+                h, w = drivable_mask.shape[:2]
+                y_idx = int(np.clip((bbox[1] + bbox[3]) / 2, 0, h - 1))
+                road_slice = drivable_mask[y_idx, :]
+                road_indices = np.where(road_slice > 128)[0]
+                if len(road_indices) > 0:
+                    road_left = road_indices[0]
+                    road_right = road_indices[-1]
+                    mid_x = (road_left + road_right) / 2
 
             # Check if vehicle is on the "wrong" side with opposing velocity
             # Left side of road (Indian roads): vehicles should move away (vy < 0 = going up)

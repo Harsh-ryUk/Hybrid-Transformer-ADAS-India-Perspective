@@ -18,6 +18,7 @@ ENV/
 # Data (don't commit large datasets or videos)
 data/samples/frames/
 data/samples/*.mp4
+data/samples/*.webm
 data/idd_yolo/
 data/bdd100k_yolo/
 data/idd_segmentation/

@@ -13,7 +13,7 @@ import logging
 import time
 import numpy as np
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -87,12 +87,14 @@ class OWLv2Detector:
         model_name: str = "google/owlv2-base-patch16-ensemble",
         text_queries: Optional[List[str]] = None,
         confidence_threshold: float = 0.15,
+        query_thresholds: Optional[Dict[str, float]] = None,
         device: str = "cuda",
         run_every_n_frames: int = 10,
     ):
         self.model_name = model_name
         self.text_queries = text_queries or self.DEFAULT_QUERIES
         self.confidence_threshold = confidence_threshold
+        self.query_thresholds = query_thresholds or {}
         self.device = device
         self.run_every_n_frames = run_every_n_frames
         self._frame_counter = 0
@@ -153,9 +155,13 @@ class OWLv2Detector:
 
             # Post-process
             target_sizes = torch.tensor([frame.shape[:2]], device=self.device)
+            base_threshold = self.confidence_threshold
+            if self.query_thresholds:
+                base_threshold = min(base_threshold, min(self.query_thresholds.values()))
+
             results = _processor.post_process_object_detection(
                 outputs,
-                threshold=self.confidence_threshold,
+                threshold=base_threshold,
                 target_sizes=target_sizes,
             )
 
@@ -169,6 +175,11 @@ class OWLv2Detector:
                 for bbox, score, label_idx in zip(boxes, scores, labels):
                     x1, y1, x2, y2 = bbox
                     label_text = self.text_queries[label_idx] if label_idx < len(self.text_queries) else f"unknown_{label_idx}"
+
+                    # Filter based on query-specific threshold if it exists, otherwise use global confidence_threshold
+                    req_threshold = self.query_thresholds.get(label_text, self.confidence_threshold)
+                    if score < req_threshold:
+                        continue
 
                     detections.append(ZeroShotDetection(
                         bbox=[float(x1), float(y1), float(x2), float(y2)],

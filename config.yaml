@@ -47,6 +47,14 @@ zero_shot:
     - "tractor"
     - "cycle-rickshaw"
   confidence_threshold: 0.15
+  query_thresholds:
+    "cow on road": 0.45
+    "auto-rickshaw": 0.60
+    "stray dog": 0.30
+    "overloaded truck": 0.40
+    "handcart on road": 0.40
+    "tractor": 0.40
+    "cycle-rickshaw": 0.40
   run_every_n_frames: 10           # Heavy model — run infrequently
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -80,6 +80,7 @@ class RuleBasedDecisionEngine:
         max_speed: float = 40.0,
         cruise_speed: float = 30.0,
         slow_speed: float = 15.0,
+        danger_zone_polygon: Optional[List[Tuple[float, float]]] = None,
     ):
         self.emergency_brake_dist = emergency_brake_distance
         self.hard_brake_dist = hard_brake_distance
@@ -91,18 +92,50 @@ class RuleBasedDecisionEngine:
         self.max_speed = max_speed
         self.cruise_speed = cruise_speed
         self.slow_speed = slow_speed
+        self.danger_zone_polygon = danger_zone_polygon
+
+    def _get_danger_zone_polygon(self, w: int, h: int) -> List[Tuple[float, float]]:
+        """Get or construct trapezoidal danger zone polygon."""
+        if self.danger_zone_polygon is not None:
+            return self.danger_zone_polygon
+        return [
+            (0.15 * w, float(h)),
+            (0.85 * w, float(h)),
+            (0.60 * w, 0.60 * h),
+            (0.40 * w, 0.60 * h)
+        ]
+
+    def _is_point_in_polygon(self, x: float, y: float, polygon: List[Tuple[float, float]]) -> bool:
+        """Ray-casting algorithm to check if a point is inside a polygon."""
+        n = len(polygon)
+        if n < 3:
+            return False
+        inside = False
+        p1x, p1y = polygon[0]
+        for i in range(n + 1):
+            p2x, p2y = polygon[i % n]
+            if y > min(p1y, p2y):
+                if y <= max(p1y, p2y):
+                    if x <= max(p1x, p2x):
+                        if p1y != p2y:
+                            xints = (y - p1y) * (p2x - p1x) / (y - p1y if p2y == p1y else p2y - p1y) + p1x
+                        if p1x == p2x or x <= xints:
+                            inside = not inside
+            p1x, p1y = p2x, p2y
+        return inside
 
     def decide(self, scene: SceneContext) -> DecisionOutput:
         """
         Main decision loop. Evaluates rules in priority order.
 
         Priority (highest first):
-        1. Emergency obstacles
-        2. Anomaly events (wrong-side, sudden crossing)
-        3. Traffic signal
-        4. Crowd density
-        5. Lane discipline
-        6. Default cruise
+        1. High-priority VRU/Animal in Danger Zone polygon
+        2. Emergency obstacles (based on distance thresholds)
+        3. Anomaly events (wrong-side, sudden crossing)
+        4. Traffic signal
+        5. Crowd density
+        6. Lane discipline
+        7. Default cruise
 
         Args:
             scene: Aggregated scene context
@@ -111,6 +144,31 @@ class RuleBasedDecisionEngine:
             DecisionOutput with action + control + reason
         """
         active_events = []
+
+        # ── Rule 0: High-priority VRU/Animal in Danger Zone Polygon ──
+        polygon = self._get_danger_zone_polygon(scene.frame_width, scene.frame_height)
+        vru_in_danger_zone = False
+        danger_obj = None
+        for obj in scene.tracked_objects:
+            category = obj.get("category", "")
+            if category in ("vulnerable_road_users", "animals"):
+                bbox = obj.get("bbox", [0, 0, 0, 0])
+                obj_cx = (bbox[0] + bbox[2]) / 2
+                obj_y = bbox[3]  # Bottom of bbox (closest point)
+                if self._is_point_in_polygon(obj_cx, obj_y, polygon):
+                    vru_in_danger_zone = True
+                    danger_obj = obj
+                    break
+
+        if vru_in_danger_zone:
+            return DecisionOutput(
+                action=ActionType.EMERGENCY_STOP,
+                control=VehicleControl(brake=1.0, emergency_stop=True),
+                confidence=0.95,
+                reason=f"EMERGENCY: High-priority {danger_obj.get('class_name', 'VRU/Animal')} inside Danger Zone polygon",
+                severity=SeverityLevel.EMERGENCY,
+                active_events=["vru_in_danger_zone"],
+            )
 
         # ── Rule 1: Emergency Obstacles ──
         closest_obj, closest_dist = self._find_closest_obstacle(scene)

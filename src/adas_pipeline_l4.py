@@ -99,6 +99,7 @@ class ADASPipelineL4:
                 model_name=zs_cfg.get("model_name", "google/owlv2-base-patch16-ensemble"),
                 text_queries=zs_cfg.get("text_queries"),
                 confidence_threshold=zs_cfg.get("confidence_threshold", 0.15),
+                query_thresholds=zs_cfg.get("query_thresholds"),
                 device=device,
                 run_every_n_frames=zs_cfg.get("run_every_n_frames", 10),
             )
@@ -144,6 +145,7 @@ class ADASPipelineL4:
             max_speed=dec_cfg.get("max_speed", 40.0),
             cruise_speed=dec_cfg.get("cruise_speed", 30.0),
             slow_speed=dec_cfg.get("slow_speed", 15.0),
+            danger_zone_polygon=dec_cfg.get("danger_zone_polygon"),
         )
 
         # ─── Profiler ───

@@ -54,7 +54,11 @@ def run_demo(source_path: str, output_path: str, max_frames: int = 120, device: 
     logger.info(f"Processing first {min(max_frames, total)} frames...")
 
     # Output writer
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    ext = os.path.splitext(output_path)[1].lower()
+    if ext == ".webm":
+        fourcc = cv2.VideoWriter_fourcc(*"VP80")
+    else:
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
     frame_count = 0
