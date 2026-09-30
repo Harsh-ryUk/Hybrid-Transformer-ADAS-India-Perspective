@@ -1,21 +1,26 @@
 # Add trustworthy benchmark results
 
 Keep hardware/workload claims separate from accuracy and safety claims. The
-checked-in Mac results are real measurements; CUDA values remain unmeasured
-until the Colab experiment completes. Do not fill gaps with expected numbers.
+checked-in Mac and Tesla T4 results are real measurements. Accuracy and vehicle
+safety remain unvalidated. Do not fill gaps with expected numbers.
 
 ## Current evidence
 
 | Experiment | Hardware/workload | Evidence | Status |
 |---|---|---|---|
 | CPU profiles | Apple M1, 2 Torch threads, repeated 1280×720 sample | [Raw traces/report/source archive](../benchmarks/mac_m1_cpu/README.md) | Measured, 60 frames/profile |
-| GPU profiles | Colab's assigned CUDA GPU | [Runnable notebook](../notebooks/colab_benchmark.ipynb) | Not yet measured |
+| GPU profiles | Colab Tesla T4, 2 host threads, repeated 1280×720 sample | [Raw traces/report/session logs](../benchmarks/colab_t4_sample_20260930T202529Z/README.md) | Measured, 300 frames/profile |
 | Indian-road accuracy | Held-out annotated driving footage | Dataset/training recipes only | Not yet established |
 | Vehicle-level safety | Closed-loop scenarios and deployment hardware | Experimental rule/simulator interfaces | Not established |
 
 The CPU reports were collected before CUDA instrumentation was added. Their
 `git_dirty: true` records are supplemented by the exact measured source archive;
 do not rewrite historical source hashes to match a newer checkout.
+
+The T4 ran clean source commit `aa018dc54f538d314ff365b4c2a9943e71689822`.
+Its sample bytes and checkpoint hashes/revisions match the CPU experiment, but
+sample counts, packages and synchronization differ. No paired hardware speedup
+or held-out accuracy improvement is claimed.
 
 ## Check the exported run
 

@@ -31,6 +31,8 @@ data/bdd100k/
 runs/
 benchmark_results.csv
 *.log
+!benchmarks/colab_t4_sample_20260930T202529Z/setup.log
+!benchmarks/colab_t4_sample_20260930T202529Z/benchmark.log
 
 # IDE
 .vscode/

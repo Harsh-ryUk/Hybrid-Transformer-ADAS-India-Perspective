@@ -1,0 +1,116 @@
+[KDownloading https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.pt to 'yolov8n.pt': 100% ━━━━━━━━━━━━ 6.2MB 231.6MB/s 0.0s
+/usr/local/lib/python3.13/dist-packages/transformers/image_processing_base.py:417: UserWarning: The following named arguments are not valid for `SegformerImageProcessor.__init__` and were ignored: 'feature_extractor_type', 'reduce_labels'
+  image_processor = cls(**image_processor_dict)
+WARNING:src.lane_detection.segformer_lane_detector:Low road pixels detected: 0. Unique classes: [0, 1, 2, 4, 8, 12, 13, 16, 20, 22, 78, 80, 83, 92, 102]
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+/usr/local/lib/python3.13/dist-packages/transformers/models/owlv2/processing_owlv2.py:201: FutureWarning: `post_process_object_detection` method is deprecated for OwlVitProcessor and will be removed in v5. Use `post_process_grounded_object_detection` instead.
+  warnings.warn(
+full512: repeat 1, frame 10/100
+full512: repeat 1, frame 20/100
+full512: repeat 1, frame 30/100
+full512: repeat 1, frame 40/100
+full512: repeat 1, frame 50/100
+full512: repeat 1, frame 60/100
+full512: repeat 1, frame 70/100
+full512: repeat 1, frame 80/100
+full512: repeat 1, frame 90/100
+full512: repeat 1, frame 100/100
+full512 repeat 1: 8.01 FPS
+full512: repeat 2, frame 10/100
+full512: repeat 2, frame 20/100
+full512: repeat 2, frame 30/100
+full512: repeat 2, frame 40/100
+full512: repeat 2, frame 50/100
+full512: repeat 2, frame 60/100
+full512: repeat 2, frame 70/100
+full512: repeat 2, frame 80/100
+full512: repeat 2, frame 90/100
+full512: repeat 2, frame 100/100
+full512 repeat 2: 8.09 FPS
+full512: repeat 3, frame 10/100
+full512: repeat 3, frame 20/100
+full512: repeat 3, frame 30/100
+full512: repeat 3, frame 40/100
+full512: repeat 3, frame 50/100
+full512: repeat 3, frame 60/100
+full512: repeat 3, frame 70/100
+full512: repeat 3, frame 80/100
+full512: repeat 3, frame 90/100
+full512: repeat 3, frame 100/100
+full512 repeat 3: 8.04 FPS
+Report: /content/Hybrid-Transformer-ADAS-India-Perspective/runs/colab_t4_sample_20260930T202529Z/full512.json
+/usr/local/lib/python3.13/dist-packages/transformers/image_processing_base.py:417: UserWarning: The following named arguments are not valid for `SegformerImageProcessor.__init__` and were ignored: 'feature_extractor_type', 'reduce_labels'
+  image_processor = cls(**image_processor_dict)
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+/usr/local/lib/python3.13/dist-packages/transformers/models/owlv2/processing_owlv2.py:201: FutureWarning: `post_process_object_detection` method is deprecated for OwlVitProcessor and will be removed in v5. Use `post_process_grounded_object_detection` instead.
+  warnings.warn(
+full256: repeat 1, frame 10/100
+full256: repeat 1, frame 20/100
+full256: repeat 1, frame 30/100
+full256: repeat 1, frame 40/100
+full256: repeat 1, frame 50/100
+full256: repeat 1, frame 60/100
+full256: repeat 1, frame 70/100
+full256: repeat 1, frame 80/100
+full256: repeat 1, frame 90/100
+full256: repeat 1, frame 100/100
+full256 repeat 1: 8.12 FPS
+full256: repeat 2, frame 10/100
+full256: repeat 2, frame 20/100
+full256: repeat 2, frame 30/100
+full256: repeat 2, frame 40/100
+full256: repeat 2, frame 50/100
+full256: repeat 2, frame 60/100
+full256: repeat 2, frame 70/100
+full256: repeat 2, frame 80/100
+full256: repeat 2, frame 90/100
+full256: repeat 2, frame 100/100
+full256 repeat 2: 8.07 FPS
+full256: repeat 3, frame 10/100
+full256: repeat 3, frame 20/100
+full256: repeat 3, frame 30/100
+full256: repeat 3, frame 40/100
+full256: repeat 3, frame 50/100
+full256: repeat 3, frame 60/100
+full256: repeat 3, frame 70/100
+full256: repeat 3, frame 80/100
+full256: repeat 3, frame 90/100
+full256: repeat 3, frame 100/100
+full256 repeat 3: 7.99 FPS
+Report: /content/Hybrid-Transformer-ADAS-India-Perspective/runs/colab_t4_sample_20260930T202529Z/full256.json
+/usr/local/lib/python3.13/dist-packages/transformers/image_processing_base.py:417: UserWarning: The following named arguments are not valid for `SegformerImageProcessor.__init__` and were ignored: 'feature_extractor_type', 'reduce_labels'
+  image_processor = cls(**image_processor_dict)
+core256: repeat 1, frame 10/100
+core256: repeat 1, frame 20/100
+core256: repeat 1, frame 30/100
+core256: repeat 1, frame 40/100
+core256: repeat 1, frame 50/100
+core256: repeat 1, frame 60/100
+core256: repeat 1, frame 70/100
+core256: repeat 1, frame 80/100
+core256: repeat 1, frame 90/100
+core256: repeat 1, frame 100/100
+core256 repeat 1: 18.49 FPS
+core256: repeat 2, frame 10/100
+core256: repeat 2, frame 20/100
+core256: repeat 2, frame 30/100
+core256: repeat 2, frame 40/100
+core256: repeat 2, frame 50/100
+core256: repeat 2, frame 60/100
+core256: repeat 2, frame 70/100
+core256: repeat 2, frame 80/100
+core256: repeat 2, frame 90/100
+core256: repeat 2, frame 100/100
+core256 repeat 2: 22.36 FPS
+core256: repeat 3, frame 10/100
+core256: repeat 3, frame 20/100
+core256: repeat 3, frame 30/100
+core256: repeat 3, frame 40/100
+core256: repeat 3, frame 50/100
+core256: repeat 3, frame 60/100
+core256: repeat 3, frame 70/100
+core256: repeat 3, frame 80/100
+core256: repeat 3, frame 90/100
+core256: repeat 3, frame 100/100
+core256 repeat 3: 18.55 FPS
+Report: /content/Hybrid-Transformer-ADAS-India-Perspective/runs/colab_t4_sample_20260930T202529Z/core256.json

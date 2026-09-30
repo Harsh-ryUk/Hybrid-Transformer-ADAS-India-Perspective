@@ -1,7 +1,9 @@
 # Run the GPU benchmark in Colab
 
-CUDA results are not published yet. This notebook runs real pretrained models;
-it does not train on Indian-road data or measure accuracy without annotations.
+[A completed Tesla T4 experiment](../benchmarks/colab_t4_sample_20260930T202529Z/README.md)
+measured 8.05/8.06/19.65 FPS for full512/full256/core256. This notebook runs real
+pretrained models; it does not train on Indian-road data or measure accuracy
+without annotations.
 Colab GPU allocation, session duration and availability vary. Record the actual
 GPU assigned to your session; do not assume a specific accelerator or FPS.
 
@@ -26,6 +28,15 @@ The notebook installs `requirements-dev.txt`, including report-generation tools.
 It does not force the Mac's Torch constraints onto Colab: the hosted Torch/CUDA
 build must match the GPU runtime. Versions are recorded in each benchmark JSON;
 the exported `pip-freeze.txt` preserves the installed environment.
+
+The published run passed 70 tests on Python 3.13.15, Torch 2.11.0+cu128 and
+Transformers 4.57.6. Installation downgraded Colab's preinstalled Transformers/
+Hugging Face Hub and emitted conflicts for unused Gradio 6.26.0 and Diffusers
+0.40.0. Those packages were not part of this benchmark; the warning and full
+environment are preserved in its export. Do not treat that global environment
+as a portable lock or combine unrelated Gradio/Diffusers work with it. Use a
+fresh VM or an isolated project environment for another experiment and record
+the actual versions and warnings.
 
 ## Optional local-agent connection
 

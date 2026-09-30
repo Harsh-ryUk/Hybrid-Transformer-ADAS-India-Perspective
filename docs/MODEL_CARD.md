@@ -25,11 +25,15 @@ Capture input is first reduced to 256×144 even for the 512×512 network profile
 
 ## Data and measurement
 
-[CPU evidence](../benchmarks/mac_m1_cpu/README.md) uses one letterboxed, repeated
+[CPU evidence](../benchmarks/mac_m1_cpu/README.md) and
+[Tesla T4 evidence](../benchmarks/colab_t4_sample_20260930T202529Z/README.md) use one letterboxed, repeated
 Ultralytics sample image at 1280×720. It exercises real inference but lacks motion,
 diverse road scenes and annotations. Throughput includes per-frame input copying
 and rendered processing; model construction and warmup are separate. Memory is
-peak process RSS. No GPU numbers are claimed.
+peak process RSS; GPU records additionally report post-warmup PyTorch allocated/
+reserved memory. The T4 measured full512/full256/core256 at 8.05/8.06/19.65 FPS,
+with p95 wall latency of 777.0/785.6/71.7 ms over 300 frames/profile. These are
+synchronized single-stream sample measurements, not target-device deadlines.
 
 The 512×512 profile produced no road mask on this sample. Smaller inputs changed
 masks/boundaries. This is an observation, not an accuracy comparison. The sample

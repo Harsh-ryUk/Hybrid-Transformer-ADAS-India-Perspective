@@ -6,7 +6,8 @@ A personal engineering project combining YOLOv8, SegFormer, optional OWLv2,
 multi-object tracking and a rule engine. Designed around mixed road users and
 Indian-road research questions, with measured runtime costs and reproducible tests.
 
-[Benchmark report](benchmarks/mac_m1_cpu/README.md) · [Architecture](ARCHITECTURE.md) ·
+[T4 GPU results](benchmarks/colab_t4_sample_20260930T202529Z/README.md) ·
+[M1 CPU results](benchmarks/mac_m1_cpu/README.md) · [Architecture](ARCHITECTURE.md) ·
 [Model card](docs/MODEL_CARD.md) · [Engineering notes](docs/ENGINEERING.md) ·
 [Test workflow](.github/workflows/ci.yml)
 
@@ -14,15 +15,17 @@ Indian-road research questions, with measured runtime costs and reproducible tes
 
 [Colab GPU guide](docs/COLAB.md) · [Publish new measurements](docs/RESULTS.md)
 
-![Real-model CPU throughput and tail latency](benchmarks/mac_m1_cpu/comparison.png)
+![Real-model T4 throughput and tail latency](benchmarks/colab_t4_sample_20260930T202529Z/comparison.png)
 
-The measured workload uses a repeated sample image on an Apple M1 CPU. It measures
-latency, not Indian-road accuracy. This is a research/simulation prototype;
+Real-model benchmarks are published for an Apple M1 CPU and a Colab Tesla T4 GPU.
+Both use a repeated sample image and measure latency, not Indian-road accuracy.
+This is a research/simulation prototype;
 legacy `L4` filenames do not establish Level 4 autonomous-driving capability.
 
 ## Run it
 
-Python 3.10–3.11 is the CI target; checked-in CPU measurements used Python 3.9.6.
+Python 3.10–3.11 is the CI target; CPU measurements used Python 3.9.6 and the
+successful Colab T4 experiment used Python 3.13.15.
 
 ```bash
 python -m venv .venv
@@ -60,10 +63,24 @@ Full runs fail if OWLv2 does not actually complete inference.
 | `full256` | 1.07 | 7552.7 | 2229 |
 | `core256` | 5.13 | 289.2 | 440 |
 
-These are real-model measurements, not accuracy scores. CUDA/Colab results have
-not been measured yet. Run the notebook with a GPU runtime to produce a separate
-report; do not replace CPU results with GPU numbers or infer real-time readiness
-from a faster sample run.
+| Measured Colab Tesla T4 profile | FPS | p95 end-to-end ms | Peak PyTorch allocated MiB |
+|---|---:|---:|---:|
+| `full512` | 8.05 | 777.0 | 1912.7 |
+| `full256` | 8.06 | 785.6 | 1913.4 |
+| `core256` | 19.65 | 71.7 | 80.7 |
+
+The [T4 evidence](benchmarks/colab_t4_sample_20260930T202529Z/README.md) contains
+300 measured frames/profile (100 × 3), 20 warmup frames/repeat, 2 host threads,
+rendered 1280×720 input, raw traces, checkpoints, source hashes and session logs.
+Periodic synchronous OWLv2 inference dominates the full profiles' tail latency.
+The compact core disables OWLv2; it is not an identical-output speedup or a
+guaranteed 20 FPS deployment. The full512 profile returned an empty road mask on
+all 300 sample frames. Accuracy metrics remain null.
+
+The CPU experiment used 60 frames/profile and different package versions and
+instrumentation. Input bytes and checkpoint revisions match, but these are not
+strictly paired hardware comparisons. Preserve both reports separately and rerun
+the same protocol for a controlled comparison.
 
 ```bash
 python scripts/benchmark_pipeline.py --device cuda --profile all --source sample --frames 100 --warmup 20 --repeats 3 --threads 2 --output runs/colab_sample/result.json
@@ -135,8 +152,9 @@ ruff check --select E9,F63,F7,F82 src scripts tests
 
 Offline tests cover tracking, rules, anomalies, metrics, preprocessing,
 input/config boundaries, background scheduling and legacy orchestration.
-CI runs tests and syntax checks on Python 3.10/3.11; its hosted status will become
-available after this local work is published.
+The engineering revision passed [hosted CI on Python 3.10/3.11](https://github.com/Harsh-ryUk/Hybrid-Transformer-ADAS-India-Perspective/actions/runs/36769926307).
+The same 70 tests also passed in the measured Colab Python 3.13/T4 environment.
+Evidence-integrity tests validate the published raw records without requiring a GPU.
 
 ## Continue the research
 
