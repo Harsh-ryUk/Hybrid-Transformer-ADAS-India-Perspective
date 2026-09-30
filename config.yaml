@@ -56,14 +56,15 @@ zero_shot:
     "tractor": 0.40
     "cycle-rickshaw": 0.40
   run_every_n_frames: 10           # Heavy model — run infrequently
+  background: false                # Opt-in worker inference; returns delayed cached detections
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Perception — Lane & Drivable Area Segmentation
 # ─────────────────────────────────────────────────────────────────────────────
 segmentation:
   model_name: "nvidia/segformer-b0-finetuned-ade-512-512"
-  input_size: [512, 512]
-  road_class_ids: [6, 12]          # ADE20K: road=6, sidewalk=12
+  input_size: [512, 512]           # [width, height]; smaller inputs reduce work but need accuracy evaluation
+  road_class_ids: [6]             # ADE20K road=6; sidewalk=11, person=12 are not drivable road
   drivable_area_threshold: 100     # Min pixels to consider valid
   use_clahe: true                  # Adaptive contrast for monsoon/night
   roi_top_fraction: 0.45           # Ignore top 45% (sky)

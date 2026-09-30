@@ -178,6 +178,8 @@ class DeepSORTTracker:
             t for t in self.trackers
             if t.time_since_update <= self.max_age
         ]
+        alive = {t.id for t in self.trackers}
+        self.tracker_metadata = {k: v for k, v in self.tracker_metadata.items() if k in alive}
 
         # ── Step 6: Build output (only confirmed tracks) ──
         tracks = []
@@ -235,17 +237,14 @@ class DeepSORTTracker:
             row_indices, col_indices = np.array([]), np.array([])
 
         # Filter by IoU threshold
-        matched = []
-        unmatched_dets = list(range(len(detections)))
-        unmatched_trks = list(range(len(trackers)))
-
-        for r, c in zip(row_indices, col_indices):
-            if iou_matrix[r, c] >= self.iou_threshold:
-                matched.append((r, c))
-                if r in unmatched_dets:
-                    unmatched_dets.remove(r)
-                if c in unmatched_trks:
-                    unmatched_trks.remove(c)
+        matched = [
+            (r, c) for r, c in zip(row_indices, col_indices)
+            if iou_matrix[r, c] >= self.iou_threshold
+        ]
+        matched_dets = {r for r, _ in matched}
+        matched_trks = {c for _, c in matched}
+        unmatched_dets = [i for i in range(len(detections)) if i not in matched_dets]
+        unmatched_trks = [i for i in range(len(trackers)) if i not in matched_trks]
 
         return matched, unmatched_dets, unmatched_trks
 

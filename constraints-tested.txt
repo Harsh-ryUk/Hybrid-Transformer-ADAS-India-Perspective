@@ -1,0 +1,14 @@
+# Direct runtime versions used for the Apple M1 CPU measurements.
+# Constraints, not a complete cross-platform dependency lock.
+torch==2.8.0
+torchvision==0.23.0
+transformers==4.57.6
+ultralytics==8.4.165
+numpy==1.26.4
+scipy==1.13.1
+opencv-python==4.11.0.86
+PyYAML==6.0.3
+Pillow==11.3.0
+huggingface-hub==0.36.2
+safetensors==0.7.0
+tqdm==4.70.1

@@ -1,4 +1,10 @@
-# Thesis Report: Vision-Based Level 4 ADAS for Indian Road Conditions
+# Archived research narrative: vision-based ADAS for Indian road conditions
+
+Earlier narrative preserved below. Historical tables/capability claims are not
+the current verified evidence. See the [reproducible CPU benchmark](benchmarks/mac_m1_cpu/README.md)
+and [model card](docs/MODEL_CARD.md). Legacy Level 4/DeepSORT descriptions do not
+establish validated autonomy or an implemented appearance encoder. GPU speedups,
+IDD accuracy and vehicle-level safety were not measured in the current work.
 
 ## Abstract
 

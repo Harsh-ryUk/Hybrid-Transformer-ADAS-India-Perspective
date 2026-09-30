@@ -1,4 +1,7 @@
-# 🏗️ System Architecture — ADAS Level 4 (India-Focused)
+# System architecture — RoadSense India
+
+Research/simulation pipeline. Legacy L4 module names remain for API compatibility;
+current measurements are in the [CPU benchmark](benchmarks/mac_m1_cpu/README.md).
 
 ## Pipeline Overview
 
@@ -17,7 +20,7 @@ graph TB
     end
 
     subgraph Tracking
-        DS[DeepSORT Tracker<br/>Kalman + Hungarian]
+        DS[SORT-style Tracker<br/>Kalman + IoU + Hungarian]
     end
 
     subgraph "Scene Understanding"
@@ -37,7 +40,8 @@ graph TB
     CAM --> DET & SEG
     CARLA --> CAM
     DET --> DS
-    OWL --> DS
+    CAM --> OWL
+    OWL --> DISPLAY[Annotated display only]
     DS --> ANOM
     SEG --> ANOM
     DET --> SIG
@@ -47,6 +51,7 @@ graph TB
     DS --> RE
     RE --> CTRL
     CTRL --> CARLA
+    CTRL --> DISPLAY
     DET & DS & RE --> PROF
     PROF --> METRICS
 ```
@@ -67,7 +72,7 @@ graph TB
 | Module | File | Algorithm | Purpose |
 |---|---|---|---|
 | Kalman Filter | `src/tracking/kalman_filter.py` | 8-state KF | Bounding box state estimation |
-| DeepSORT | `src/tracking/deep_sort_tracker.py` | KF + Hungarian + IoU | Multi-object tracking with IDs |
+| SORT-style tracker | `src/tracking/deep_sort_tracker.py` | KF + Hungarian + IoU; no appearance encoder | Multi-object tracking with IDs |
 
 ### Decision Layer
 

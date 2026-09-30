@@ -1,0 +1,19 @@
+# Compact CPU research demo. OWLv2 is intentionally disabled.
+system:
+  name: RoadSense-India
+  device: cpu
+detection:
+  model_path: yolov8n.pt
+  confidence_threshold: 0.35
+  iou_threshold: 0.45
+  input_size: [640, 640]
+zero_shot:
+  enabled: false
+segmentation:
+  model_name: nvidia/segformer-b0-finetuned-ade-512-512
+  input_size: [256, 144]
+  road_class_ids: [6]
+tracking:
+  max_age: 30
+  min_hits: 3
+  iou_threshold: 0.3

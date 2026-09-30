@@ -123,11 +123,13 @@ class IndiaObjectDetector:
         iou_thres: float = 0.45,
         device: str = "cuda",
         category_thresholds: Optional[Dict[str, float]] = None,
+        input_size: Tuple[int, int] = (640, 640),
     ):
         self.conf_thres = conf_thres
         self.iou_thres = iou_thres
         self.device = device
         self.model_path = model_path
+        self.input_size = tuple(input_size)
 
         # Per-category thresholds (safety-critical classes get lower thresholds)
         self.category_thresholds = category_thresholds or {
@@ -186,10 +188,11 @@ class IndiaObjectDetector:
         # Run YOLO inference
         results = self.model(
             frame,
-            conf=min(self.category_thresholds.values()),  # Use lowest threshold
+            conf=min([self.conf_thres, *self.category_thresholds.values()]),
             iou=self.iou_thres,
             verbose=False,
             device=self.device,
+            imgsz=(self.input_size[1], self.input_size[0]),
         )
 
         result = results[0]
@@ -200,8 +203,8 @@ class IndiaObjectDetector:
         detections = []
         for bbox, score, cid in zip(boxes_raw, scores_raw, class_ids_raw):
             # Get class name
-            if self.is_idd_model and cid < len(IDD_CLASSES):
-                class_name = IDD_CLASSES[cid]
+            if self.is_idd_model:
+                class_name = self.model_names.get(cid, f"class_{cid}")
             elif cid in INDIA_CLASS_MAP:
                 class_name = INDIA_CLASS_MAP[cid]
             else:

@@ -2,11 +2,9 @@
 End-to-End Evaluation Runner for ADAS L4 Pipeline
 Runs the full pipeline on a validation dataset and generates comprehensive metrics.
 
-Metrics computed:
-- Detection: mAP@0.5, per-class AP
-- Segmentation: mIoU, pixel accuracy, road IoU
-- Tracking: MOTA, MOTP, ID switches
-- System: FPS, per-stage latency breakdown
+This runner reports runtime, counts and rule-action distributions. It does not
+compute mAP, IoU or MOTA without ground-truth annotations. For warmup/repeat/tail
+latency measurement and source/model provenance, use benchmark_pipeline.py.
 
 Usage:
     # Evaluate on IDD validation set
@@ -79,7 +77,6 @@ def evaluate_on_video(
         return
 
     # Stats collectors
-    all_metrics = []
     action_counts = defaultdict(int)
     anomaly_counts = defaultdict(int)
     detection_class_counts = defaultdict(int)
@@ -97,7 +94,6 @@ def evaluate_on_video(
             viz_frame, metrics = pipeline.process_frame(frame, frame_idx)
 
             # Collect metrics
-            all_metrics.append(metrics)
             action_counts[metrics["decision"]["action"]] += 1
             total_detections += metrics["detections"]
             total_tracks += metrics["tracks"]
@@ -116,6 +112,8 @@ def evaluate_on_video(
                 decision_ms=lat["decision_ms"],
                 visualization_ms=lat["visualization_ms"],
                 total_ms=lat["total_ms"],
+                zero_shot_ms=lat["zero_shot_ms"],
+                signal_ms=lat["signal_ms"],
             ))
 
             # Video output
@@ -141,6 +139,7 @@ def evaluate_on_video(
     except KeyboardInterrupt:
         logger.info("Evaluation interrupted.")
     finally:
+        pipeline.close()
         if writer:
             writer.release()
 
@@ -179,6 +178,8 @@ def evaluate_on_video(
         },
 
         "latency_breakdown": {
+            "zero_shot_ms": round(perf_summary.get("avg_latency", {}).get("zero_shot_ms", 0), 2),
+            "signal_ms": round(perf_summary.get("avg_latency", {}).get("signal_ms", 0), 2),
             "detection_ms": round(perf_summary.get("avg_latency", {}).get("detection_ms", 0), 2),
             "segmentation_ms": round(perf_summary.get("avg_latency", {}).get("segmentation_ms", 0), 2),
             "tracking_ms": round(perf_summary.get("avg_latency", {}).get("tracking_ms", 0), 2),
@@ -229,17 +230,18 @@ def _video_frames(source, max_frames=None):
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {source}")
 
-    idx = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        idx += 1
-        if max_frames and idx > max_frames:
-            break
-        yield idx, frame
-
-    cap.release()
+    try:
+        idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            idx += 1
+            if max_frames and idx > max_frames:
+                break
+            yield idx, frame
+    finally:
+        cap.release()
 
 
 def _directory_frames(source, max_frames=None):

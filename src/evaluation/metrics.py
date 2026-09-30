@@ -13,6 +13,7 @@ import logging
 import time
 import json
 import numpy as np
+from collections import deque
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, field
 
@@ -29,6 +30,8 @@ class LatencyProfile:
     decision_ms: float = 0.0
     visualization_ms: float = 0.0
     total_ms: float = 0.0
+    zero_shot_ms: float = 0.0
+    signal_ms: float = 0.0
 
     @property
     def fps(self) -> float:
@@ -43,6 +46,8 @@ class LatencyProfile:
             "decision_ms": round(self.decision_ms, 2),
             "visualization_ms": round(self.visualization_ms, 2),
             "total_ms": round(self.total_ms, 2),
+            "zero_shot_ms": round(self.zero_shot_ms, 2),
+            "signal_ms": round(self.signal_ms, 2),
             "fps": round(self.fps, 1),
         }
 
@@ -199,12 +204,14 @@ class SegmentationMetrics:
 
     def add_frame(self, pred_mask: np.ndarray, gt_mask: np.ndarray):
         """Add prediction and GT mask for one frame."""
-        pred_flat = pred_mask.flatten()
-        gt_flat = gt_mask.flatten()
+        n = self.num_classes
+        pred_flat = pred_mask.ravel().astype(np.int64)
+        gt_flat = gt_mask.ravel().astype(np.int64)
 
-        for i in range(self.num_classes):
-            for j in range(self.num_classes):
-                self._confusion[i, j] += np.sum((gt_flat == i) & (pred_flat == j))
+        # One pass: label pairs -> flat confusion index. Out-of-range labels (e.g. 255 "ignore") are skipped.
+        valid = (gt_flat >= 0) & (gt_flat < n) & (pred_flat >= 0) & (pred_flat < n)
+        pairs = gt_flat[valid] * n + pred_flat[valid]
+        self._confusion += np.bincount(pairs, minlength=n * n).reshape(n, n)
 
     def compute_iou(self) -> Dict[str, float]:
         """Compute per-class IoU and mean IoU."""
@@ -328,12 +335,10 @@ class SystemProfiler:
 
     def __init__(self, window_size: int = 60):
         self.window_size = window_size
-        self._latencies: List[LatencyProfile] = []
+        self._latencies: deque = deque(maxlen=window_size)
 
     def add_frame(self, latency: LatencyProfile):
         self._latencies.append(latency)
-        if len(self._latencies) > self.window_size:
-            self._latencies.pop(0)
 
     def get_summary(self) -> Dict:
         """Get average metrics over the window."""
@@ -349,6 +354,8 @@ class SystemProfiler:
             decision_ms=sum(l.decision_ms for l in self._latencies) / n,
             visualization_ms=sum(l.visualization_ms for l in self._latencies) / n,
             total_ms=sum(l.total_ms for l in self._latencies) / n,
+            zero_shot_ms=sum(l.zero_shot_ms for l in self._latencies) / n,
+            signal_ms=sum(l.signal_ms for l in self._latencies) / n,
         )
 
         return {
@@ -357,6 +364,7 @@ class SystemProfiler:
             "frames_profiled": n,
             "min_fps": round(min(l.fps for l in self._latencies), 1),
             "max_fps": round(max(l.fps for l in self._latencies), 1),
+            "latency_percentiles_ms": {f"p{p}": round(float(np.percentile([l.total_ms for l in self._latencies], p)), 2) for p in (50, 95, 99)},
         }
 
     def reset(self):

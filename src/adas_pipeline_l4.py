@@ -1,6 +1,6 @@
 """
-ADAS Level 4 Pipeline — India-Focused (Master Orchestrator)
-Integrates all modules into a unified real-time processing pipeline.
+RoadSense India research/simulation orchestrator (legacy L4 API name).
+Combines pretrained perception with tracking and experimental scene rules.
 
 Pipeline Flow:
   Frame → Detect → Track → Segment → Analyze Events → Decide → Control
@@ -14,7 +14,7 @@ Modules:
 - Evaluation: SystemProfiler (per-stage latency)
 - Simulation: CARLABridge (optional)
 
-Indian Datasets Used:
+Dataset preparation/training recipes (not validated training evidence):
 - IDD: http://idd.insaan.iiit.ac.in/
 - BDD100K: https://bdd-data.berkeley.edu/
 - Mapillary Vistas: https://www.mapillary.com/dataset/vistas
@@ -25,6 +25,7 @@ import time
 import yaml
 import cv2
 import numpy as np
+import torch
 from typing import Dict, Any, Optional, Tuple
 
 # ─── Module Imports ───
@@ -37,13 +38,14 @@ from src.decision.rule_engine import RuleBasedDecisionEngine, SceneContext
 from src.decision.control_output import DecisionOutput, VehicleControl
 from src.traffic_control.signal_classifier import TrafficSignalClassifier
 from src.evaluation.metrics import LatencyProfile, SystemProfiler
+from src.utils.runtime import resolve_device, validate_config
 
 logger = logging.getLogger(__name__)
 
 
 class ADASPipelineL4:
     """
-    Level 4 ADAS Pipeline for Indian Road Conditions.
+    Road-scene research pipeline; not validated Level 4 autonomy.
 
     Combines all perception, tracking, decision, and anomaly modules
     into a single real-time processing loop.
@@ -66,7 +68,7 @@ class ADASPipelineL4:
     def __init__(
         self,
         config_path: Optional[str] = None,
-        device: str = "cuda",
+        device: Optional[str] = None,
     ):
         """
         Initialize all pipeline components.
@@ -76,7 +78,9 @@ class ADASPipelineL4:
             device: 'cuda' or 'cpu'
         """
         self.config = self._load_config(config_path)
+        device = resolve_device(device or self.config.get("system", {}).get("device", "auto"))
         self.device = device
+        self.profile_synchronize = self.config.get("system", {}).get("profile_synchronize", False)
 
         logger.info("═" * 60)
         logger.info("  ADAS Level 4 Pipeline — India-Focused")
@@ -90,6 +94,7 @@ class ADASPipelineL4:
             iou_thres=det_cfg.get("iou_threshold", 0.45),
             device=device,
             category_thresholds=det_cfg.get("category_thresholds"),
+            input_size=det_cfg.get("input_size", [640, 640]),
         )
 
         zs_cfg = self.config.get("zero_shot", {})
@@ -102,6 +107,7 @@ class ADASPipelineL4:
                 query_thresholds=zs_cfg.get("query_thresholds"),
                 device=device,
                 run_every_n_frames=zs_cfg.get("run_every_n_frames", 10),
+                background=zs_cfg.get("background", False),
             )
 
         # ─── Segmentation ───
@@ -109,6 +115,8 @@ class ADASPipelineL4:
         self.lane_detector = SegFormerLaneDetector(
             model_name=seg_cfg.get("model_name", "nvidia/segformer-b0-finetuned-ade-512-512"),
             device=device,
+            input_size=seg_cfg.get("input_size"),
+            road_class_ids=seg_cfg.get("road_class_ids"),
         )
 
         # ─── Traffic Signal ───
@@ -159,18 +167,15 @@ class ADASPipelineL4:
     def _load_config(self, path: Optional[str]) -> Dict:
         """Load YAML config or return defaults."""
         if path:
-            try:
-                with open(path, "r") as f:
-                    return yaml.safe_load(f) or {}
-            except Exception as e:
-                logger.warning(f"Config load failed ({e}), using defaults")
+            with open(path, "r") as f:
+                return validate_config(yaml.safe_load(f))
         return {}
 
     def process_frame(
-        self, frame: np.ndarray, frame_id: int = 0
+        self, frame: np.ndarray, frame_id: int = 0, *, render: bool = True
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
-        Process a single frame through the full L4 pipeline.
+        Process a frame through the research pipeline.
 
         Args:
             frame: BGR image (numpy array)
@@ -179,27 +184,32 @@ class ADASPipelineL4:
         Returns:
             (visualized_frame, metrics_dict)
         """
+        if not isinstance(frame, np.ndarray) or frame.dtype != np.uint8 or frame.ndim != 3 or frame.shape[2] != 3 or min(frame.shape[:2]) == 0:
+            raise ValueError("frame must be a non-empty HxWx3 uint8 BGR image")
         self.frame_count += 1
         h, w = frame.shape[:2]
         latency = LatencyProfile()
-        t_total_start = time.time()
+        clock = self._profile_clock
+        t_total_start = clock()
 
         # ═════════════════════════════════════════════════════════════
         # Stage 1: Object Detection (YOLOv8 — India-aware)
         # ═════════════════════════════════════════════════════════════
-        t0 = time.time()
+        t0 = clock()
         detection_result = self.detector.detect(frame)
-        latency.detection_ms = (time.time() - t0) * 1000
+        latency.detection_ms = (clock() - t0) * 1000
 
         # Optional: OWLv2 zero-shot detection (runs periodically)
         owl_detections = []
         if self.owl_detector is not None:
+            t0 = clock()
             owl_detections = self.owl_detector.detect(frame)
+            latency.zero_shot_ms = (clock() - t0) * 1000
 
         # ═════════════════════════════════════════════════════════════
         # Stage 2: Multi-Object Tracking (DeepSORT)
         # ═════════════════════════════════════════════════════════════
-        t0 = time.time()
+        t0 = clock()
         boxes, scores, class_ids = detection_result.get_boxes_scores_classes()
         class_names = [d.class_name for d in detection_result.detections]
         categories = [d.category for d in detection_result.detections]
@@ -210,32 +220,34 @@ class ADASPipelineL4:
             class_names=class_names,
             categories=categories,
         )
-        latency.tracking_ms = (time.time() - t0) * 1000
+        latency.tracking_ms = (clock() - t0) * 1000
 
         # ═════════════════════════════════════════════════════════════
         # Stage 3: Lane & Drivable Area Segmentation (SegFormer)
         # ═════════════════════════════════════════════════════════════
-        t0 = time.time()
+        t0 = clock()
         # Detect seasonal condition for adaptive preprocessing
         condition = self._detect_condition(frame)
         lane_result = self.lane_detector.detect(frame, condition=condition)
         lane_mask = lane_result.get("lane_mask", np.zeros((h, w), dtype=np.uint8))
-        latency.segmentation_ms = (time.time() - t0) * 1000
+        latency.segmentation_ms = (clock() - t0) * 1000
 
         # ═════════════════════════════════════════════════════════════
         # Stage 4: Traffic Signal Classification
         # ═════════════════════════════════════════════════════════════
+        t0 = clock()
         traffic_signal = "Unknown"
         for det in detection_result.detections:
             if det.class_name == "traffic_light":
                 bbox = [int(v) for v in det.bbox]
                 traffic_signal = self.signal_classifier.classify(frame, tuple(bbox))
                 break
+        latency.signal_ms = (clock() - t0) * 1000
 
         # ═════════════════════════════════════════════════════════════
         # Stage 5: Anomaly Detection
         # ═════════════════════════════════════════════════════════════
-        t0 = time.time()
+        t0 = clock()
         track_dicts = [
             {
                 "track_id": t.track_id,
@@ -254,12 +266,12 @@ class ADASPipelineL4:
             frame_width=w,
             frame_height=h,
         )
-        latency.anomaly_ms = (time.time() - t0) * 1000
+        latency.anomaly_ms = (clock() - t0) * 1000
 
         # ═════════════════════════════════════════════════════════════
         # Stage 6: Decision Making
         # ═════════════════════════════════════════════════════════════
-        t0 = time.time()
+        t0 = clock()
         scene = SceneContext(
             tracked_objects=track_dicts,
             traffic_signal=traffic_signal,
@@ -272,19 +284,19 @@ class ADASPipelineL4:
         )
 
         decision = self.decision_engine.decide(scene)
-        latency.decision_ms = (time.time() - t0) * 1000
+        latency.decision_ms = (clock() - t0) * 1000
 
         # ═════════════════════════════════════════════════════════════
         # Stage 7: Visualization
         # ═════════════════════════════════════════════════════════════
-        t0 = time.time()
+        t0 = clock()
         viz_frame = self._visualize(
             frame, detection_result, tracks, lane_result,
             anomaly_events, decision, owl_detections, traffic_signal, latency
-        )
-        latency.visualization_ms = (time.time() - t0) * 1000
+        ) if render else frame
+        latency.visualization_ms = (clock() - t0) * 1000
 
-        latency.total_ms = (time.time() - t_total_start) * 1000
+        latency.total_ms = (clock() - t_total_start) * 1000
         self.profiler.add_frame(latency)
 
         # ─── Metrics ───
@@ -297,9 +309,30 @@ class ADASPipelineL4:
             "traffic_signal": traffic_signal,
             "latency": latency.to_dict(),
             "owl_detections": len(owl_detections),
+            "active_anomalies": [e.to_dict() for e in anomaly_events],
+            "rendered": render,
+            "zero_shot": self.owl_detector.status() if self.owl_detector is not None else {"enabled": False},
+            "road_mask_coverage": lane_result.get("lane_confidence", 0.0),
         }
 
         return viz_frame, metrics
+
+    def _profile_clock(self):
+        """Opt-in synchronization measures completed CUDA work, not dispatch time."""
+        if self.profile_synchronize and torch.device(self.device).type == 'cuda':
+            torch.cuda.synchronize(self.device)
+        return time.perf_counter()
+
+    def close(self):
+        """Drain optional background inference before releasing the pipeline."""
+        if self.owl_detector is not None:
+            self.owl_detector.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
 
     def _detect_condition(self, frame: np.ndarray) -> str:
         """Simple brightness-based condition detection."""
@@ -340,11 +373,15 @@ class ADASPipelineL4:
         h, w = viz.shape[:2]
 
         # ─── Lane overlay ───
+        # Blend dark green (drivable area) only inside the mask's bounding box.
         lane_mask = lane_result.get("lane_mask", None)
-        if lane_mask is not None and lane_mask.any():
-            overlay = viz.copy()
-            overlay[lane_mask > 0] = [0, 120, 0]  # Dark green for drivable area
-            cv2.addWeighted(overlay, 0.3, viz, 0.7, 0, viz)
+        if lane_mask is not None:
+            x, y, bw, bh = cv2.boundingRect(lane_mask)
+            if bw and bh:
+                roi = viz[y:y + bh, x:x + bw]
+                green = np.empty_like(roi)
+                green[:] = (0, 120, 0)
+                cv2.copyTo(cv2.addWeighted(green, 0.3, roi, 0.7, 0), lane_mask[y:y + bh, x:x + bw], roi)
 
         # Draw lane polynomials
         for pts in lane_result.get("lane_points", []):
@@ -419,10 +456,11 @@ class ADASPipelineL4:
         """Draw heads-up display with key info."""
         h, w = frame.shape[:2]
 
-        # Semi-transparent panel at top
-        overlay = frame.copy()
+        # OpenCV rectangle endpoints are inclusive: preserve rows 0 through 80.
+        band = frame[:81]
+        overlay = band.copy()
         cv2.rectangle(overlay, (0, 0), (w, 80), (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+        cv2.addWeighted(overlay, 0.6, band, 0.4, 0, band)
 
         # Row 1: Action + FPS
         action_colors = {
@@ -437,9 +475,12 @@ class ADASPipelineL4:
         cv2.putText(frame, f"ACTION: {decision.action.value.upper()}", (10, 25),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, action_color, 2)
 
-        fps_text = f"FPS: {latency.fps:.0f}"
-        cv2.putText(frame, fps_text, (w - 120, 25),
+        summary = self.profiler.get_summary()
+        fps_text = f"AVG FPS: {summary['avg_fps']:.1f}" if summary else "AVG FPS: warming up"
+        cv2.putText(frame, fps_text, (max(10, w - 270), 25),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(frame, "RoadSense India | RESEARCH DEMO", (max(10, w - 350), 72),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
 
         # Row 2: Decision reason
         cv2.putText(frame, decision.reason[:60], (10, 50),
@@ -528,6 +569,7 @@ class ADASPipelineL4:
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
         finally:
+            self.close()
             cap.release()
             if writer:
                 writer.release()
@@ -593,6 +635,7 @@ class ADASPipelineL4:
         except KeyboardInterrupt:
             logger.info("Simulation stopped.")
         finally:
+            self.close()
             bridge.cleanup()
             cv2.destroyAllWindows()
 
@@ -612,7 +655,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ADAS Level 4 Pipeline — India-Focused")
     parser.add_argument("--source", type=str, default="0", help="Video source (0 for webcam, or file path)")
     parser.add_argument("--config", type=str, default="config.yaml", help="Config YAML path")
-    parser.add_argument("--device", type=str, default="cuda", help="Device (cuda/cpu)")
+    parser.add_argument("--device", type=str, default=None, help="Device (auto/cuda/cpu); defaults to config")
     parser.add_argument("--headless", action="store_true", help="Save output without display")
     parser.add_argument("--carla", action="store_true", help="Run with CARLA simulator")
     parser.add_argument("--output", type=str, default="output_l4.mp4", help="Output video path")

@@ -8,6 +8,7 @@ import numpy as np
 import cv2
 import os
 import sys
+from unittest.mock import patch
 
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -22,8 +23,14 @@ class TestADASV2(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         print("Setting up V2 Test Suite...")
-        # Use CPU for testing to avoid OOM on CI environments
-        cls.pipeline = ADASPipelineV2(device='cpu')
+        # Unit tests exercise orchestration without network downloads; real-model
+        # latency is measured separately by scripts/benchmark_pipeline.py.
+        with patch('src.adas_pipeline_v2.RoadDamageDetector') as detection, patch('src.adas_pipeline_v2.SegFormerLaneDetector') as segmentation:
+            detection.return_value.detect.return_value = (np.empty((0, 4)), np.empty(0), np.empty(0))
+            detection.return_value.get_class_names.return_value = {}
+            segmentation.return_value.detect.side_effect = lambda frame, **kwargs: {
+                'lane_mask': np.zeros(frame.shape[:2], np.uint8), 'lane_points': [], 'lane_confidence': 0.0}
+            cls.pipeline = ADASPipelineV2(device='cpu')
         
     def test_pipeline_initialization(self):
         """Verify the pipeline initializes all components."""

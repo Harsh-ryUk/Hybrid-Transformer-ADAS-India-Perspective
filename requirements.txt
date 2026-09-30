@@ -2,14 +2,14 @@ ultralytics>=8.0.0
 opencv-python>=4.8.0
 numpy>=1.24.0
 torch>=2.0.0
-onnxruntime-gpu>=1.16.0
 PyYAML>=6.0
 tqdm>=4.65.0
 scipy>=1.10.0
-transformers>=4.30.0
+transformers>=4.57,<5
 huggingface-hub>=0.16.0
 safetensors>=0.3.1
-pydantic>=2.0.0
 Pillow>=9.0.0
+# Only for src/production_lane_detection (no macOS wheels for the -gpu build):
+# onnxruntime-gpu>=1.16.0
 # CARLA Python API (install separately from https://carla.org/)
 # carla==0.9.15

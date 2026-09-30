@@ -1,164 +1,168 @@
-<div align="center">
+# RoadSense India
 
-# 🇮🇳 ADAS Level 4 — India-Focused Autonomous Driving
+### Hybrid vision models for road-scene perception, tracking and simulation
 
-### A Modular Perception-Tracking-Decision Pipeline for Chaotic Traffic
+A personal engineering project combining YOLOv8, SegFormer, optional OWLv2,
+multi-object tracking and a rule engine. Designed around mixed road users and
+Indian-road research questions, with measured runtime costs and reproducible tests.
 
-[![Python 3.10](https://img.shields.io/badge/Python-3.10-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org/)
-[![YOLOv8](https://img.shields.io/badge/YOLO-v8-00FFFF?style=for-the-badge&logo=yolo&logoColor=black)](https://github.com/ultralytics/ultralytics)
-[![SegFormer](https://img.shields.io/badge/SegFormer-Transformers-FF5722?style=for-the-badge&logo=huggingface&logoColor=white)](https://huggingface.co/)
-[![CARLA](https://img.shields.io/badge/CARLA-Simulator-orange?style=for-the-badge)](https://carla.org/)
+[Benchmark report](benchmarks/mac_m1_cpu/README.md) · [Architecture](ARCHITECTURE.md) ·
+[Model card](docs/MODEL_CARD.md) · [Engineering notes](docs/ENGINEERING.md) ·
+[Test workflow](.github/workflows/ci.yml)
 
-<br />
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Harsh-ryUk/Hybrid-Transformer-ADAS-India-Perspective/blob/main/notebooks/colab_benchmark.ipynb)
 
-**Robust autonomous driving perception adapted for the chaos of Indian streets.**
+[Colab GPU guide](docs/COLAB.md) · [Publish new measurements](docs/RESULTS.md)
+
+![Real-model CPU throughput and tail latency](benchmarks/mac_m1_cpu/comparison.png)
+
+The measured workload uses a repeated sample image on an Apple M1 CPU. It measures
+latency, not Indian-road accuracy. This is a research/simulation prototype;
+legacy `L4` filenames do not establish Level 4 autonomous-driving capability.
+
+## Run it
+
+Python 3.10–3.11 is the CI target; checked-in CPU measurements used Python 3.9.6.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt -c constraints-tested.txt
+
+# Compact CPU demo: YOLO + SegFormer + tracking + scene rules
+python -m src.adas_pipeline_l4 --config configs/cpu.yaml --source video.mp4 --device cpu --headless --output result.mp4
+
+# Full model configuration, including periodic OWLv2
+python -m src.adas_pipeline_l4 --config config.yaml --source video.mp4 --device cpu
+```
+
+Weights download on first use. `configs/cpu.yaml` disables supplemental OWLv2;
+it is a different operating profile, not an equivalent prediction path.
+The full profile is substantially slower on CPU. Webcam source: `--source 0`.
+
+## Measure the entire pipeline
+
+```bash
+pip install -r requirements-dev.txt
+python scripts/benchmark_pipeline.py --profile all --source sample --frames 30 --warmup 10 --repeats 2 --threads 2 --output runs/benchmark/result.json
+python scripts/summarize_benchmark.py --directory runs/benchmark
+```
+
+The runner uses real models and creates per-frame CSV/JSON traces, previews and a
+comparison report. Each profile runs in a separate process. It records warmup,
+cold initialization, throughput, p50/p95/p99 frame latency, every processing stage,
+process peak RSS, source/config/code hashes, model revisions and package versions.
+Full runs fail if OWLv2 does not actually complete inference.
+
+| Measured Apple M1 CPU profile | FPS | p95 end-to-end ms | Peak RSS MiB |
+|---|---:|---:|---:|
+| `full512` | 0.85 | 7804.2 | 2226 |
+| `full256` | 1.07 | 7552.7 | 2229 |
+| `core256` | 5.13 | 289.2 | 440 |
+
+These are real-model measurements, not accuracy scores. CUDA/Colab results have
+not been measured yet. Run the notebook with a GPU runtime to produce a separate
+report; do not replace CPU results with GPU numbers or infer real-time readiness
+from a faster sample run.
+
+```bash
+python scripts/benchmark_pipeline.py --device cuda --profile all --source sample --frames 100 --warmup 20 --repeats 3 --threads 2 --output runs/colab_sample/result.json
+python scripts/summarize_benchmark.py --directory runs/colab_sample
+```
+
+Explicit CUDA requests fail if unavailable. CUDA measurements synchronize stage
+boundaries and frame completion, recording GPU identity and PyTorch peak allocated/
+reserved memory separately from process RSS. This serial instrumentation adds
+overhead; it is not a batch-throughput or overlapped execution benchmark.
+
+| Profile | SegFormer network input | OWLv2 | Purpose |
+|---|---|---|---|
+| `full512` | 512×512 | Every 10 frames, synchronous | Full configuration reference |
+| `full256` | 256×144 | Every 10 frames, synchronous | Isolate the resolution tradeoff |
+| `core256` | 256×144 | Disabled | Measure the compact core |
+
+Use `--source /path/to/dashcam.mp4` for video and `--no-render` for headless
+processing. Provide enough frames for warmup plus measurement. Cached runs can
+use `HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`.
+
+## How it works
 
 ```mermaid
-graph LR
-    Camera[Camera Feed] --> DET[India Detector]
-    DET --> TRACK[DeepSORT Tracker]
-    Camera --> SEG[SegFormer Lanes]
-    TRACK --> DECIDE[Rule Engine]
-    SEG --> DECIDE
-    DECIDE --> CTRL[Vehicle Control]
-    CTRL --> CARLA[CARLA / ROS]
+flowchart LR
+    Camera[Frame] --> YOLO[YOLO detection]
+    Camera --> Seg[SegFormer road mask]
+    Camera --> OWL[Optional OWLv2]
+    YOLO --> Track[Kalman + IoU association]
+    YOLO --> Signal[Signal color heuristic]
+    Track --> Scene[Anomaly heuristics]
+    Seg --> Scene
+    Scene --> Rules[Rule engine]
+    Signal --> Rules
+    Track --> Rules
+    Seg --> Rules
+    Rules --> Output[Simulation commands + report]
+    OWL --> Preview[Annotated preview]
+    Output --> Preview
 ```
 
-</div>
+OWLv2 detections are supplemental display results, not fused into tracking or
+decisions. The tracker is SORT-style Kalman/IoU/Hungarian association; its legacy
+`DeepSORTTracker` class has no learned appearance encoder. SegFormer estimates
+drivable-region edges, not trained lane-marking segmentation.
 
----
+## Engineering decisions
 
-## 🎯 What Makes This Different
+- Bound profiler history and remove expired tracker metadata on long runs.
+- Blend overlays in image regions and build confusion matrices with one histogram.
+- Convert BGR to RGB before transformer preprocessing and preserve model label taxonomies.
+- Reject invalid frames/configs; resolve the same CPU/CUDA device for every module.
+- Expose OWLv2 completion, failure and result age; drain workers during cleanup.
+- Test model contracts and orchestration offline; measure real models separately.
 
-This is **not** another generic ADAS demo. Built specifically for Indian roads:
+`zero_shot.background: true` is an optional worker mode with one outstanding job.
+It drops work while busy and returns older cached boxes. This changes freshness
+and can contend with primary models. It is not a guaranteed real-time fix.
+The current segmentation path first resizes capture input to 256×144 before the
+network resize. Larger network dimensions do not restore lost source detail.
 
-| Challenge | Our Solution |
-|---|---|
-| Auto-rickshaws, handcarts | **OWLv2 zero-shot detection** — no training needed |
-| Cows/dogs on road | **Per-category thresholds** (animals: 0.20 confidence) |
-| Wrong-side driving | **Anomaly detector** with velocity analysis |
-| Faded/missing lanes | **SegFormer drivable area** instead of line detection |
-| Chaotic density | **DeepSORT** tracking 50+ objects simultaneously |
-| Potholes everywhere | **Contrast-based road anomaly detection** |
+## Test it
 
----
-
-## 🧱 Architecture
-
-```
-Camera → IndiaDetector(YOLOv8) → DeepSORT → AnomalyDetector → RuleEngine → Control
-              ↓                                    ↑
-         OWLv2 (async)                      SegFormer Lanes
-```
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for full system diagrams.
-
-### Modules
-
-| Module | Description | Key File |
-|---|---|---|
-| 🔍 Object Detection | YOLOv8 + IDD class mapping | `src/perception/india_detector.py` |
-| 🦉 Zero-Shot Detection | OWLv2 for rare Indian objects | `src/perception/owl_detector.py` |
-| 🛣️ Lane Segmentation | SegFormer-B0 drivable area | `src/lane_detection/segformer_lane_detector.py` |
-| 📦 Multi-Object Tracking | DeepSORT (Kalman + Hungarian) | `src/tracking/deep_sort_tracker.py` |
-| ⚠️ Anomaly Detection | Wrong-side, crossing, animal, pothole | `src/anomaly/event_detector.py` |
-| 🧠 Decision Engine | Priority-ordered rule system | `src/decision/rule_engine.py` |
-| 🎮 CARLA Simulation | Full simulation bridge | `src/simulation/carla_bridge.py` |
-| 📊 Evaluation | mAP, IoU, MOTA, FPS profiling | `src/evaluation/metrics.py` |
-
----
-
-## 📊 Indian Datasets
-
-| Dataset | Classes | Purpose |
-|---|---|---|
-| [IDD](http://idd.insaan.iiit.ac.in/) | 30 | Indian road classes (auto-rickshaw, animal) |
-| [BDD100K](https://bdd-data.berkeley.edu/) | 10 | Diverse driving scenarios |
-| [Mapillary Vistas](https://www.mapillary.com/dataset/vistas) | 66 | Fine-grained street segmentation |
-| Custom (YouTube + CVAT) | 8+ | India-specific dashcam annotations |
-
----
-
-## 🚀 Quick Start
-
-### Option A: Video Processing
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Run on video
-python -m src.adas_pipeline_l4 --source data/samples/indian_road.mp4 --device cuda
-
-# Run on webcam
-python -m src.adas_pipeline_l4 --source 0
-
-# Headless mode (save output)
-python -m src.adas_pipeline_l4 --source video.mp4 --headless --output result.mp4
+pip install -r requirements-dev.txt -c constraints-tested.txt
+python -m pytest -q
+ruff check --select E9,F63,F7,F82 src scripts tests
 ```
 
-### Option B: CARLA Simulation
-```bash
-# 1. Start CARLA server (separate terminal)
-./CarlaUE4.exe  # Windows
+Offline tests cover tracking, rules, anomalies, metrics, preprocessing,
+input/config boundaries, background scheduling and legacy orchestration.
+CI runs tests and syntax checks on Python 3.10/3.11; its hosted status will become
+available after this local work is published.
 
-# 2. Run pipeline with CARLA
-python -m src.adas_pipeline_l4 --carla --config config.yaml
-```
+## Continue the research
 
-### Run Tests
-```bash
-python -m pytest tests/test_l4_pipeline.py -v
-```
+The sample has no ground truth: mAP, road IoU and MOTA remain unmeasured.
+The [model card](docs/MODEL_CARD.md) distinguishes implementation, measurements
+and unvalidated capabilities. IDD/BDD100K preparation and training recipes live
+in `scripts/prepare_idd.py`, `scripts/prepare_bdd100k.py`,
+`scripts/train_yolo_idd.py` and `scripts/train_segformer_idd.py`.
 
----
+The project now has reproducible measurement, regression tests, device/input
+contracts, CI and an explicit model card: useful production-minded engineering
+for a portfolio. It is not an industry-qualified ADAS product. Held-out accuracy,
+target-device deadlines, failure handling and closed-loop safety need separate
+evidence. See [the results protocol](docs/RESULTS.md) for acceptance criteria and
+how to report the next experiments without overstating them.
 
-## 📂 Project Structure
+The next evidence milestone is an annotated, held-out Indian dashcam set spanning
+day/night, rain, occlusion, animals and mixed traffic. Dataset access, trained
+weights, GPU deployment and CARLA/ROS integration are separate validation tasks.
+For the optional ONNX demo, install `onnxruntime` (CPU/macOS) or a supported
+`onnxruntime-gpu` build separately.
 
-```text
-ADAS-L4-India/
-├── config.yaml                    # Central configuration
-├── src/
-│   ├── adas_pipeline_l4.py        # 🎯 Master L4 Orchestrator
-│   ├── perception/
-│   │   ├── india_detector.py      # YOLOv8 India-aware detection
-│   │   └── owl_detector.py        # OWLv2 zero-shot detection
-│   ├── lane_detection/
-│   │   └── segformer_lane_detector.py
-│   ├── tracking/
-│   │   ├── kalman_filter.py       # 8-state Kalman filter
-│   │   └── deep_sort_tracker.py   # DeepSORT tracker
-│   ├── decision/
-│   │   ├── rule_engine.py         # Priority-ordered decisions
-│   │   └── control_output.py      # Vehicle control commands
-│   ├── anomaly/
-│   │   └── event_detector.py      # Edge-case detection
-│   ├── simulation/
-│   │   ├── carla_bridge.py        # CARLA integration
-│   │   └── sensor_manager.py      # Camera management
-│   └── evaluation/
-│       └── metrics.py             # mAP, IoU, MOTA, profiling
-├── tests/
-│   └── test_l4_pipeline.py        # Comprehensive test suite
-├── ARCHITECTURE.md                # System architecture docs
-├── THESIS_REPORT.md               # Academic thesis report
-└── requirements.txt
-```
+## Attribution
 
----
-
-## 📄 Documentation
-
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** — System architecture with diagrams
-- **[THESIS_REPORT.md](THESIS_REPORT.md)** — Academic thesis report
-- **[config.yaml](config.yaml)** — All tunable parameters
-
----
-
-<div align="center">
-
-### 📄 [Read the Full Thesis Report](THESIS_REPORT.md)
-
-*Problem statement, methodology, dataset analysis, and evaluation framework.*
-
-</div>
+Models: [Ultralytics YOLO](https://github.com/ultralytics/ultralytics),
+[NVIDIA SegFormer-B0](https://huggingface.co/nvidia/segformer-b0-finetuned-ade-512-512),
+[Google OWLv2](https://huggingface.co/google/owlv2-base-patch16-ensemble).
+Sample previews derive from Ultralytics' bundled `assets/bus.jpg`, not Indian-road
+footage. Model, dependency and dataset licenses remain their own.
