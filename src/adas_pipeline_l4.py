@@ -117,6 +117,9 @@ class ADASPipelineL4:
             device=device,
             input_size=seg_cfg.get("input_size"),
             road_class_ids=seg_cfg.get("road_class_ids"),
+            frame_roi=seg_cfg.get("frame_roi"),
+            roi_top_fraction=seg_cfg.get("roi_top_fraction", 0.45),
+            min_road_coverage=seg_cfg.get("min_road_coverage", 0.02),
         )
 
         # ─── Traffic Signal ───
@@ -139,6 +142,8 @@ class ADASPipelineL4:
             crossing_proximity_threshold=anom_cfg.get("crossing_proximity_threshold", 200.0),
             pothole_contrast_threshold=anom_cfg.get("pothole_contrast_threshold", 40.0),
             pothole_min_area=anom_cfg.get("pothole_min_area", 500.0),
+            surface_min_frames=anom_cfg.get("surface_min_frames", 3),
+            wrong_side_enabled=anom_cfg.get("wrong_side_enabled", False),
         )
 
         # ─── Decision Engine ───
@@ -276,7 +281,8 @@ class ADASPipelineL4:
             tracked_objects=track_dicts,
             traffic_signal=traffic_signal,
             lane_center_offset=self._compute_lane_offset(lane_result, w),
-            lane_detected=len(lane_result.get("lane_points", [])) > 0,
+            lane_detected=lane_result.get("lane_markings_detected", False),
+            road_observed=lane_result.get("road_observed", bool(np.any(lane_mask))),
             drivable_mask=lane_mask,
             active_anomalies=[e.to_dict() for e in anomaly_events],
             frame_height=h,
@@ -313,6 +319,8 @@ class ADASPipelineL4:
             "rendered": render,
             "zero_shot": self.owl_detector.status() if self.owl_detector is not None else {"enabled": False},
             "road_mask_coverage": lane_result.get("lane_confidence", 0.0),
+            "road_status": lane_result.get("road_status", 'unknown'),
+            "lane_markings_detected": lane_result.get("lane_markings_detected", False),
         }
 
         return viz_frame, metrics
@@ -388,6 +396,9 @@ class ADASPipelineL4:
             if len(pts) > 1:
                 pts_array = np.array(pts, dtype=np.int32)
                 cv2.polylines(viz, [pts_array], False, (0, 255, 255), 2)
+        status = lane_result.get('road_status', 'unknown')
+        cv2.putText(viz, f'ROAD: {status.upper()} | LANE MARKINGS: NOT VALIDATED', (10, 103),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 255), 1)
 
         # ─── Tracked objects ───
         for track in tracks:

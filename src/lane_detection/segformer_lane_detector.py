@@ -1,7 +1,4 @@
-"""
-SegFormer Lane Detection Module (v2.0)
-Implements state-of-the-art semantic segmentation for lane markings using SegFormer-B0.
-"""
+"""Semantic road regions, not trained lane-marking segmentation."""
 
 import logging
 import time
@@ -15,7 +12,7 @@ from src.utils.runtime import resolve_device
 
 logger = logging.getLogger(__name__)
 
-# Every frame is first shrunk to this (w, h); it is the only detail the model ever sees.
+# Legacy compact network size. Capture frames are no longer pre-shrunk to it.
 CAPTURE_SIZE = (256, 144)
 
 class SegFormerLaneDetector:
@@ -35,6 +32,9 @@ class SegFormerLaneDetector:
         device: str = "cuda",
         input_size: Optional[Tuple[int, int]] = None,
         road_class_ids: Optional[List[int]] = None,
+        frame_roi: Optional[List[float]] = None,
+        roi_top_fraction: float = 0.45,
+        min_road_coverage: float = 0.02,
     ):
         """
         Initialize the SegFormer Model.
@@ -42,12 +42,18 @@ class SegFormerLaneDetector:
         Args:
             model_name: HuggingFace model identifier.
             device: 'cuda' or 'cpu'.
-            input_size: (width, height) fed to the model. None = the model's own
-                preprocessor size (512x512). Use CAPTURE_SIZE to skip the upsample
-                and run ~7x fewer pixels through the network.
+            input_size: Network (width, height); resized directly from the source ROI.
             road_class_ids: Model-specific drivable labels; defaults to ADE20K road (6).
+            frame_roi: Normalized [left, top, right, bottom] crop; exclude video borders/hood explicitly.
         """
         self.device = torch.device(resolve_device(device))
+        self.frame_roi = tuple(frame_roi) if frame_roi is not None else (0, 0, 1, 1)
+        if len(self.frame_roi) != 4 or not all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in self.frame_roi) or not (self.frame_roi[0] < self.frame_roi[2] and self.frame_roi[1] < self.frame_roi[3]):
+            raise ValueError('frame_roi must be normalized [left, top, right, bottom]')
+        if not 0 <= roi_top_fraction < 1 or not 0 <= min_road_coverage <= 1:
+            raise ValueError('Invalid road ROI/coverage threshold')
+        self.roi_top_fraction = roi_top_fraction
+        self.min_road_coverage = min_road_coverage
         logger.info(f"Initializing SegFormer ({model_name}) on {self.device}...")
 
         try:
@@ -61,14 +67,8 @@ class SegFormerLaneDetector:
             self._std = torch.tensor(processor.image_std, device=self.device).view(1, 3, 1, 1) * 255
             self.model = SegformerForSemanticSegmentation.from_pretrained(model_name)
             
-            # Map output to 2 classes (Background=0, Lane=1)
-            # Note: The pretrained model has 150 classes. We will take the class indices 
-            # corresponding to 'road', 'lane' etc. usually found in ADE20k.
-            # For this 'production' simulation, we will use a binary mask derived from logic,
-            # or ideally fine-tune. Since we can't fine-tune instantly, we will use a logic 
-            # to extract likely road/lane classes or assume the user provided fine-tuned weights.
-            # Assuming fine-tuned binary output for v2.0 spec implies `num_labels=2`.
-            # Here we wrap it compatibility.
+            if not self.road_class_ids or any(type(i) is not int or not 0 <= i < self.model.config.num_labels for i in self.road_class_ids):
+                raise ValueError('road_class_ids must reference valid model output labels')
             
             self.model.to(self.device)
             self.model.eval()
@@ -109,12 +109,18 @@ class SegFormerLaneDetector:
         t0 = time.time()
         h, w = frame.shape[:2]
         
-        # Optimization: 256x144 is a good balance for CPU (16:9 aspect)
-        small_frame = cv2.resize(frame, CAPTURE_SIZE)
+        roi = getattr(self, 'frame_roi', (0, 0, 1, 1))
+        x0, y0, x1, y1 = int(roi[0] * w), int(roi[1] * h), int(roi[2] * w), int(roi[3] * h)
+        crop = frame[y0:y1, x0:x1]
+        if not crop.size:
+            raise ValueError('frame_roi is empty at this frame resolution')
 
         # Inference
         with torch.inference_mode():
-            logits = self.model(pixel_values=self.preprocess(small_frame, condition)).logits
+            logits = self.model(pixel_values=self.preprocess(crop, condition)).logits
+            # Interpolate class logits before argmax, not a coarse binary mask afterward.
+            target = (min(384, crop.shape[0]), min(384, crop.shape[1]))
+            logits = torch.nn.functional.interpolate(logits, size=target, mode='bilinear', align_corners=False)
             # Build the binary road mask on-device so only 1 byte/px crosses to the CPU.
             pred = logits.argmax(dim=1)[0]
             road = torch.zeros_like(pred, dtype=torch.bool)
@@ -122,8 +128,20 @@ class SegFormerLaneDetector:
                 road |= pred == class_id
             road_small = road.to(torch.uint8).mul_(255).cpu().numpy()
 
-        # Resize MASK to original (Nearest neighbor for speed)
-        lane_mask = cv2.resize(road_small, (w, h), interpolation=cv2.INTER_NEAREST)
+        top = int(road_small.shape[0] * getattr(self, 'roi_top_fraction', 0.45))
+        road_small[:top] = 0
+        # Close small holes, but never dilate a predicted road into nearby objects.
+        road_small = cv2.morphologyEx(road_small, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(road_small)
+        candidates = [i for i in range(1, count)
+                      if stats[i, cv2.CC_STAT_TOP] + stats[i, cv2.CC_STAT_HEIGHT] > road_small.shape[0] * 0.6]
+        if candidates:
+            selected = max(candidates, key=lambda i: stats[i, cv2.CC_STAT_AREA])
+            road_small = np.where(labels == selected, 255, 0).astype(np.uint8)
+        else:
+            road_small[:] = 0
+        lane_mask = np.zeros((h, w), dtype=np.uint8)
+        lane_mask[y0:y1, x0:x1] = cv2.resize(road_small, (x1 - x0, y1 - y0), interpolation=cv2.INTER_NEAREST)
 
         # Debug: Check if we see anything
         road_pixels = cv2.countNonZero(lane_mask)
@@ -131,36 +149,23 @@ class SegFormerLaneDetector:
             logger.warning(f"Low road pixels detected: {road_pixels}. Unique classes: {pred.unique().tolist()}")
         self._low_road_logged = road_pixels < 100
 
-        # Region of Interest Filter (Remove sky/horizon noise): keep bottom 50%
-        lane_mask[:int(h * 0.5)] = 0
-
-        # Dilate mask to close gaps (important for dashed lines/poor segmentation)
-        lane_mask = cv2.dilate(lane_mask, self._kernel, iterations=1)
-
-        # Find Edges of the Road (The Lanes)
-        edges = cv2.Canny(lane_mask, 100, 200)
-
-        # Split and Fit (Left/Right) on views of `edges` — no per-side mask copies.
-        # We assume the camera is roughly centered.
-        midpoint = w // 2
-        left_coeffs, left_pts = self.fit_polynomial(edges[:, :midpoint], width=w)
-        right_coeffs, right_pts = self.fit_polynomial(edges[:, midpoint:], x_offset=midpoint, width=w)
-        
-        combined_pts = []
-        if left_pts: combined_pts.append(left_pts)
-        if right_pts: combined_pts.append(right_pts)
-
-        # Fraction of the lower image covered by the road mask; not a calibrated probability.
-        confidence = cv2.countNonZero(lane_mask[h // 2:]) / max((h - h // 2) * w, 1)
+        confidence = cv2.countNonZero(lane_mask) / max((y1 - y0) * (x1 - x0), 1)
+        valid = confidence >= getattr(self, 'min_road_coverage', 0.02)
+        if not valid:
+            lane_mask[:] = 0
 
         t1 = time.time()
         
         return {
-            "lane_points": combined_pts, # List of Lists [[x,y]..]
+            "lane_points": [],  # Road boundaries are not lane markings or a steering target.
             "lane_mask": lane_mask, 
             "lane_confidence": float(confidence),
             "detection_method": "segformer",
-            "polynomial_coeffs": [left_coeffs, right_coeffs],
+            "polynomial_coeffs": [[], []],
+            "road_observed": valid,
+            "road_status": 'observed' if valid else 'unknown',
+            "lane_markings_detected": False,
+            "frame_roi_pixels": [x0, y0, x1, y1],
             "seasonal_condition": condition,
             "processing_time_ms": (t1 - t0) * 1000
         }

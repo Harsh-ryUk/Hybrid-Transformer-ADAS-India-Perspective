@@ -1,0 +1,2 @@
+# Official COCO bbox evaluation; separate from runtime requirements.
+pycocotools>=2.0.7,<3

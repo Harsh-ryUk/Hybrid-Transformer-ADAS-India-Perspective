@@ -6,7 +6,8 @@ A personal engineering project combining YOLOv8, SegFormer, optional OWLv2,
 multi-object tracking and a rule engine. Designed around mixed road users and
 Indian-road research questions, with measured runtime costs and reproducible tests.
 
-[T4 GPU results](benchmarks/colab_t4_sample_20260930T202529Z/README.md) ·
+[T4 moving-video results](benchmarks/colab_t4_video_20261001/README.md) ·
+[Historical T4 sample results](benchmarks/colab_t4_sample_20260930T202529Z/README.md) ·
 [M1 CPU results](benchmarks/mac_m1_cpu/README.md) · [Architecture](ARCHITECTURE.md) ·
 [Model card](docs/MODEL_CARD.md) · [Engineering notes](docs/ENGINEERING.md) ·
 [Test workflow](.github/workflows/ci.yml)
@@ -15,10 +16,15 @@ Indian-road research questions, with measured runtime costs and reproducible tes
 
 [Colab GPU guide](docs/COLAB.md) · [Publish new measurements](docs/RESULTS.md)
 
-![Real-model T4 throughput and tail latency](benchmarks/colab_t4_sample_20260930T202529Z/comparison.png)
+![Paired T4 video throughput, tail latency and stage costs](benchmarks/colab_t4_video_20261001/comparison.png)
 
-Real-model benchmarks are published for an Apple M1 CPU and a Colab Tesla T4 GPU.
-Both use a repeated sample image and measure latency, not Indian-road accuracy.
+Real-model benchmarks cover an Apple M1 CPU and a Colab Tesla T4 GPU.
+The current quality pipeline was also measured on a native-resolution moving
+video: bounded-region surface filtering increased throughput from **6.95 to
+11.05 FPS**, reducing p95 latency from **207 to 132 ms**, with matching recorded
+per-frame counts, coverage and actions. See the [paired evidence](benchmarks/colab_t4_video_20261001/README.md).
+The older sample reports use a repeated image and different profiles;
+their figures are not interchangeable with the video workload. Neither measures accuracy.
 This is a research/simulation prototype;
 legacy `L4` filenames do not establish Level 4 autonomous-driving capability.
 
@@ -44,6 +50,20 @@ it is a different operating profile, not an equivalent prediction path.
 The full profile is substantially slower on CPU. Webcam source: `--source 0`.
 
 ## Measure the entire pipeline
+
+For the current quality profile, use a suitable camera ROI; this configuration
+is specific to the portrait demo clip.
+
+```bash
+python scripts/benchmark_pipeline.py --profile configured --config configs/dashcam_quality.yaml --source video.mp4 --native-resolution --device cuda:0 --frames 594 --warmup 20 --repeats 3 --threads 2 --output runs/video/configured.json
+```
+
+The [T4 video experiment](benchmarks/colab_t4_video_20261001/README.md) measured
+1782 frames/revision, including decode and rendering, without frame sampling.
+It reached 11.05 FPS, not the source's 59.94 FPS. OWL was disabled in both
+revisions. No real-time deadline or accuracy claim follows from these numbers.
+
+The following tables and `all` command describe the historical sample profiles:
 
 ```bash
 pip install -r requirements-dev.txt
@@ -139,8 +159,29 @@ drivable-region edges, not trained lane-marking segmentation.
 `zero_shot.background: true` is an optional worker mode with one outstanding job.
 It drops work while busy and returns older cached boxes. This changes freshness
 and can contend with primary models. It is not a guaranteed real-time fix.
-The current segmentation path first resizes capture input to 256×144 before the
-network resize. Larger network dimensions do not restore lost source detail.
+The historical benchmark code first resized capture input to 256×144 before the
+network resize. The current path resizes directly from the source ROI, interpolates
+logits before selecting road labels and filters disconnected regions. It no longer
+turns road boundaries into lane-marking polynomials or steering commands.
+
+## Inspect a dashcam clip
+
+`configs/dashcam_quality.yaml` uses 512×512 road inference and an explicit crop for
+the supplied vertical Short. Change `segmentation.frame_roi` for a different video;
+the crop excludes embedded borders and the bonnet, not arbitrary road obstacles.
+
+```bash
+python -m src.adas_pipeline_l4 --config configs/dashcam_quality.yaml --source video.mp4 --device cpu --headless --output result.mp4
+```
+
+Unknown road masks suppress default cruise in the simulation rules. Surface
+anomalies are persistent local-contrast candidates, not confirmed potholes.
+See [road-quality changes and limitations](docs/ROAD_QUALITY.md).
+
+For labelled validation and native-resolution video replay, see
+[held-out accuracy and moving-video evaluation](docs/ACCURACY_EVALUATION.md).
+`scripts/evaluate_accuracy.py` computes binary pixel IoU and standard COCO box
+metrics only from an explicit annotated manifest; no synthetic accuracy is claimed.
 
 ## Test it
 
@@ -154,6 +195,9 @@ Offline tests cover tracking, rules, anomalies, metrics, preprocessing,
 input/config boundaries, background scheduling and legacy orchestration.
 The engineering revision passed [hosted CI on Python 3.10/3.11](https://github.com/Harsh-ryUk/Hybrid-Transformer-ADAS-India-Perspective/actions/runs/36769926307).
 The same 70 tests also passed in the measured Colab Python 3.13/T4 environment.
+The current quality/evaluation revision passes 108 local tests, including pairing and archived
+video-evidence tests. Its 25 focused road-quality/metric tests passed in the
+Colab Python 3.13/T4 environment; pairing tests use generated fixtures.
 Evidence-integrity tests validate the published raw records without requiring a GPU.
 
 ## Continue the research

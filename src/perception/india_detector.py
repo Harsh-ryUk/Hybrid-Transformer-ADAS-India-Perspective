@@ -1,7 +1,7 @@
 """
 India-Aware Object Detector (L4 ADAS)
 Multi-class YOLOv8 detection with India-specific categories.
-Trained on IDD / BDD100K / COCO with class remapping for Indian roads.
+Default weights are COCO-pretrained; no IDD or BDD100K training is claimed.
 """
 
 import logging

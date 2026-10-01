@@ -64,7 +64,18 @@ def distribution(values):
     }.items()}
 
 
-def source_frames(source, width, height):
+def configure_profile(config, profile):
+    """The configured profile preserves model choices and image preprocessing."""
+    if profile != 'configured':
+        config['segmentation']['input_size'] = [512, 512] if profile == 'full512' else [256, 144]
+        config['zero_shot']['enabled'] = profile != 'core256'
+        config['zero_shot']['background'] = False
+    elif config.get('zero_shot', {}).get('enabled', True) and config['zero_shot'].get('background', False):
+        raise ValueError('Configured benchmark requires foreground zero-shot inference or zero-shot disabled')
+    return config
+
+
+def source_frames(source, width, height, native_resolution=False):
     import cv2
     import numpy as np
     if source == 'sample':
@@ -74,22 +85,39 @@ def source_frames(source, width, height):
         path = Path(source).resolve()
     if not path.is_file():
         raise ValueError(f'Input does not exist: {path}')
-    metadata = {'path': str(path), 'sha256': digest(path), 'requested_resolution': [width, height]}
+    metadata = {'path': str(path), 'sha256': digest(path),
+                'requested_resolution': None if native_resolution else [width, height],
+                'native_resolution': native_resolution}
     image = cv2.imread(str(path)) if path.suffix.lower() in ('.jpg', '.jpeg', '.png', '.bmp') else None
     if image is not None:
         metadata['kind'] = 'repeated_sample_image' if source == 'sample' else 'repeated_user_image'
         ih, iw = image.shape[:2]
+        metadata['original_resolution'] = [iw, ih]
+        if native_resolution:
+            width, height = iw, ih
         scale = min(width / iw, height / ih)
         resized = cv2.resize(image, (max(1, round(iw * scale)), max(1, round(ih * scale))))
         canvas = np.full((height, width, 3), 114, np.uint8)
         y, x = (height - resized.shape[0]) // 2, (width - resized.shape[1]) // 2
         canvas[y:y + resized.shape[0], x:x + resized.shape[1]] = resized
+        metadata['processed_resolution'] = [width, height]
 
         def images():
             while True:
                 yield canvas.copy()
         return images(), metadata
     metadata['kind'] = 'video'
+    probe = cv2.VideoCapture(str(path))
+    try:
+        if not probe.isOpened():
+            raise ValueError(f'Cannot decode video: {path}')
+        metadata['original_resolution'] = [int(probe.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                                           int(probe.get(cv2.CAP_PROP_FRAME_HEIGHT))]
+        metadata['source_fps'] = float(probe.get(cv2.CAP_PROP_FPS))
+        metadata['reported_frame_count'] = int(probe.get(cv2.CAP_PROP_FRAME_COUNT))
+        metadata['processed_resolution'] = metadata['original_resolution'] if native_resolution else [width, height]
+    finally:
+        probe.release()
 
     def video():
         cap = cv2.VideoCapture(str(path))
@@ -100,7 +128,7 @@ def source_frames(source, width, height):
                 ok, frame = cap.read()
                 if not ok:
                     return
-                yield cv2.resize(frame, (width, height))
+                yield frame if native_resolution else cv2.resize(frame, (width, height))
         finally:
             cap.release()
     return video(), metadata
@@ -119,9 +147,7 @@ def run(args):
     config = yaml.safe_load(Path(args.config).read_text())
     config['system']['device'] = device
     config['system']['profile_synchronize'] = cuda
-    config['segmentation']['input_size'] = [512, 512] if args.profile == 'full512' else [256, 144]
-    config['zero_shot']['enabled'] = args.profile != 'core256'
-    config['zero_shot']['background'] = False
+    configure_profile(config, args.profile)
     # Resolve local weights relative to the repository, not the caller's CWD.
     weights = Path(config['detection']['model_path'])
     if not weights.is_absolute() and (ROOT / weights).is_file():
@@ -137,7 +163,7 @@ def run(args):
             initialization_ms = (time.perf_counter() - startup) * 1000
             source_metadata = None
             for repeat in range(args.repeats):
-                frames, source_metadata = source_frames(args.source, args.width, args.height)
+                frames, source_metadata = source_frames(args.source, args.width, args.height, args.native_resolution)
                 try:
                     warmup = time.perf_counter()
                     for _ in range(args.warmup):
@@ -164,6 +190,8 @@ def run(args):
                                'anomalies': metrics['anomalies'], 'action': metrics['decision']['action'],
                                'traffic_signal': metrics['traffic_signal']}
                         row['road_mask_coverage'] = metrics['road_mask_coverage']
+                        row['road_status'] = metrics.get('road_status', 'unknown')
+                        row['source_frame'] = args.warmup + index
                         row['torch_threads'] = torch.get_num_threads()
                         if row['torch_threads'] != args.threads:
                             raise RuntimeError('A model changed the measured CPU thread budget')
@@ -203,7 +231,7 @@ def run(args):
     elapsed = sum(repeat['wall_seconds'] for repeat in repeats)
     stages = {key: distribution([row[key] for row in rows]) for key in rows[0] if key.endswith('_ms')}
     report = {
-        'schema_version': 2, 'timestamp_utc': datetime.now(timezone.utc).isoformat(),
+        'schema_version': 3, 'timestamp_utc': datetime.now(timezone.utc).isoformat(),
         'profile': args.profile, 'source': source_metadata, 'configuration': config,
         'configuration_sha256': hashlib.sha256(yaml.safe_dump(config).encode()).hexdigest(),
         'source_files_sha256': {str(path.relative_to(ROOT)): digest(path) for path in
@@ -230,7 +258,9 @@ def run(args):
         'protocol': {'frames_per_repeat': args.frames, 'repeats': args.repeats,
                      'warmup_frames_per_repeat': args.warmup, 'render': not args.no_render,
                      'device': device, 'cuda_stage_synchronization': cuda,
-                     'zero_shot_interval': config['zero_shot']['run_every_n_frames']},
+                     'zero_shot_interval': config.get('zero_shot', {}).get('run_every_n_frames', 10),
+                     'state_between_repeats': 'retained; input video reopened and warmup repeated',
+                     'native_resolution': args.native_resolution},
         'initialization_ms': round(initialization_ms, 2),
         'throughput_fps': round(len(rows) / elapsed, 3), 'latency_ms': stages,
         'process_peak_rss_mb': round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss /
@@ -238,13 +268,24 @@ def run(args):
         'gpu_peak_allocated_mib': max(r['gpu_peak_allocated_mib'] for r in repeats) if cuda else None,
         'gpu_peak_reserved_mib': max(r['gpu_peak_reserved_mib'] for r in repeats) if cuda else None,
         'actions': dict(actions), 'repeats': repeats, 'frames': rows,
+        'road_observation_frames': dict(Counter(row['road_status'] for row in rows)),
         'accuracy': {'mAP': None, 'road_IoU': None, 'MOTA': None, 'reason': 'No ground-truth annotations in this latency workload'},
-        'limitations': ['Repeated sample image does not measure real driving robustness or temporal tracking accuracy',
+        'limitations': ['No ground truth: mask coverage and observation counts are not accuracy scores',
+                        'Repeated image workloads do not measure real driving robustness; short video workloads do not establish generalization',
                         'Tail percentiles are descriptive for this sample count, not service guarantees',
                         'Profile changes can alter predictions; core256 disables supplemental zero-shot inference',
                         'CUDA stage boundaries synchronize completed work; instrumentation prevents overlap and adds overhead',
                         'No real-time scheduling deadline or vehicle safety certification is established'],
     }
+    source_fps = source_metadata.get('source_fps', 0)
+    if source_fps > 0:
+        budget = 1000 / source_fps
+        report['source_frame_budget'] = {
+            'source_fps': source_fps, 'budget_ms': budget,
+            'measured_frames_with_wall_time_within_budget': sum(row['wall_ms'] <= budget for row in rows),
+            'measured_frames': len(rows),
+            'note': 'Offline service-time comparison only; live queue delay and dropped frames were not measured',
+        }
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2))
@@ -257,7 +298,7 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--profile', choices=(*PROFILES, 'all'), default='all')
+    parser.add_argument('--profile', choices=(*PROFILES, 'configured', 'all'), default='all')
     parser.add_argument('--source', default='sample', help='sample, image path, or video path')
     parser.add_argument('--device', default='cpu', help='cpu, cuda, cuda:0 or auto; explicit unavailable CUDA fails')
     parser.add_argument('--config', default=str(ROOT / 'config.yaml'))
@@ -268,6 +309,7 @@ def main():
     parser.add_argument('--width', type=int, default=1280)
     parser.add_argument('--height', type=int, default=720)
     parser.add_argument('--no-render', action='store_true')
+    parser.add_argument('--native-resolution', action='store_true', help='Preserve decoded dimensions, especially portrait video')
     parser.add_argument('--output', default=str(ROOT / 'runs' / 'benchmark' / 'result.json'))
     args = parser.parse_args()
     if min(args.frames, args.repeats, args.threads, args.width, args.height) < 1 or args.warmup < 0:
@@ -282,6 +324,8 @@ def main():
                 command.extend(['--' + name, str(getattr(args, name))])
             if args.no_render:
                 command.append('--no-render')
+            if args.native_resolution:
+                command.append('--native-resolution')
             subprocess.run(command, check=True)
     else:
         run(args)

@@ -72,6 +72,8 @@ class AnomalyEventDetector:
         crossing_proximity_threshold: float = 200.0,
         pothole_contrast_threshold: float = 40.0,
         pothole_min_area: float = 500.0,
+        surface_min_frames: int = 3,
+        wrong_side_enabled: bool = True,
     ):
         self.wrong_side_vel_thresh = wrong_side_velocity_threshold
         self.wrong_side_min_frames = wrong_side_min_frames
@@ -79,6 +81,11 @@ class AnomalyEventDetector:
         self.crossing_prox_thresh = crossing_proximity_threshold
         self.pothole_contrast_thresh = pothole_contrast_threshold
         self.pothole_min_area = pothole_min_area
+        if type(surface_min_frames) is not int or surface_min_frames < 1:
+            raise ValueError('surface_min_frames must be a positive integer')
+        self.surface_min_frames = surface_min_frames
+        self.wrong_side_enabled = wrong_side_enabled
+        self._surface_candidates = []
 
         # Track history for wrong-side detection
         self._wrong_side_counters: Dict[int, int] = {}
@@ -109,7 +116,8 @@ class AnomalyEventDetector:
         events = []
 
         # 1. Wrong-side driving detection
-        events.extend(self._detect_wrong_side(tracks, frame_width, drivable_mask))
+        if self.wrong_side_enabled:
+            events.extend(self._detect_wrong_side(tracks, frame_width, drivable_mask))
 
         # 2. Sudden crossing detection
         events.extend(self._detect_sudden_crossing(tracks, frame_width, frame_height))
@@ -120,7 +128,9 @@ class AnomalyEventDetector:
 
         # 4. Road surface anomalies (potholes)
         if frame is not None and drivable_mask is not None:
-            events.extend(self._detect_road_anomalies(frame, drivable_mask))
+            events.extend(self._detect_road_anomalies(frame, drivable_mask, tracks))
+        else:
+            self._surface_candidates = []
 
         # Update position history
         self._update_position_history(tracks)
@@ -269,9 +279,9 @@ class AnomalyEventDetector:
             bbox = track.get("bbox", [0, 0, 0, 0])
             track_id = track.get("track_id", -1)
 
-            # Check if bbox center is on drivable area
+            # Ground contact is at the foot of the box, not the animal's torso.
             cx = int(np.clip((bbox[0] + bbox[2]) / 2, 0, w - 1))
-            cy = int(np.clip((bbox[1] + bbox[3]) / 2, 0, h - 1))
+            cy = int(np.clip(bbox[3] - 1, 0, h - 1))
 
             # Check a small region around center
             y_start = max(0, cy - 5)
@@ -292,14 +302,33 @@ class AnomalyEventDetector:
 
         return events
 
+    @staticmethod
+    def _surface_dark_mask(gray, support, threshold):
+        """Exact supported black-hat result with a closing-operation halo.
+
+        A 61px closing reads at most 60px beyond each output pixel (dilation
+        then erosion). Preserve that halo so cropping does not change scores.
+        """
+        import cv2
+        dark_mask = np.zeros_like(support)
+        x, y, w, h = cv2.boundingRect(support)
+        if not w or not h:
+            return dark_mask
+        halo = 60
+        x0, y0 = max(0, x - halo), max(0, y - halo)
+        x1, y1 = min(gray.shape[1], x + w + halo), min(gray.shape[0], y + h + halo)
+        local_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (61, 61))
+        contrast = cv2.morphologyEx(gray[y0:y1, x0:x1], cv2.MORPH_BLACKHAT, local_kernel)
+        dark_mask[y0:y1, x0:x1] = ((contrast >= threshold) & (support[y0:y1, x0:x1] > 0)).astype(np.uint8) * 255
+        return cv2.morphologyEx(dark_mask, cv2.MORPH_OPEN,
+                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+
     def _detect_road_anomalies(
-        self, frame: np.ndarray, drivable_mask: np.ndarray
+        self, frame: np.ndarray, drivable_mask: np.ndarray, tracks: Optional[List[Dict]] = None
     ) -> List[AnomalyEvent]:
         """
-        Detect potholes and road surface damage using contrast analysis.
-
-        Heuristic: Dark patches on the drivable area that are significantly
-        darker than surrounding road surface.
+        Persistent local-contrast candidates, NOT confirmed potholes.
+        Mask edges, tracked objects, large shadows and one-frame patches are rejected.
         """
         import cv2
 
@@ -309,50 +338,68 @@ class AnomalyEventDetector:
             # Convert to grayscale
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            # Only analyze drivable area
-            road_only = cv2.bitwise_and(gray, drivable_mask)
+            if drivable_mask.shape != gray.shape:
+                raise ValueError('drivable_mask must match frame dimensions')
+            support = (drivable_mask > 128).astype(np.uint8) * 255
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+            support = cv2.erode(support, kernel)
+            for track in tracks or []:
+                x0, y0, x1, y1 = [int(v) for v in track.get('bbox', [0, 0, 0, 0])]
+                support[max(0, y0 - 8):min(gray.shape[0], y1 + 8),
+                        max(0, x0 - 8):min(gray.shape[1], x1 + 8)] = 0
 
             # Calculate mean road brightness
-            road_pixels = gray[drivable_mask > 128]
+            road_pixels = gray[support > 0]
             if len(road_pixels) < 100:
+                self._surface_candidates = []
                 return events
-
-            mean_brightness = np.mean(road_pixels)
-
-            # Find dark patches (potential potholes)
-            dark_threshold = max(20, mean_brightness - self.pothole_contrast_thresh)
-            _, dark_mask = cv2.threshold(road_only, dark_threshold, 255, cv2.THRESH_BINARY_INV)
-
-            # Clean up with morphology
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-            dark_mask = cv2.morphologyEx(dark_mask, cv2.MORPH_OPEN, kernel)
-            dark_mask = cv2.morphologyEx(dark_mask, cv2.MORPH_CLOSE, kernel)
-
-            # Only within drivable area
-            dark_mask = cv2.bitwise_and(dark_mask, drivable_mask)
+            # Black-hat measures local dark contrast instead of a global road mean.
+            dark_mask = self._surface_dark_mask(gray, support, self.pothole_contrast_thresh)
 
             # Find contours
             contours, _ = cv2.findContours(dark_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-            for contour in contours:
+            current = []
+            used_previous = set()
+            for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:20]:
                 area = cv2.contourArea(contour)
-                if area < self.pothole_min_area:
+                if area < self.pothole_min_area or area > len(road_pixels) * 0.12:
                     continue
 
                 x, y, w, h = cv2.boundingRect(contour)
                 aspect = w / max(h, 1)
 
                 # Potholes tend to be roughly circular (aspect ratio 0.5–2.0)
-                if 0.3 < aspect < 3.0:
+                box = [float(x), float(y), float(x + w), float(y + h)]
+                # Require the entire bounding ROI to lie on supported road; this
+                # prevents cropped object edges and mask borders becoming candidates.
+                if not (0.5 < aspect < 2.5) or np.mean(support[y:y+h, x:x+w] > 0) < 0.95:
+                    continue
+                hits = 1
+                previous = getattr(self, '_surface_candidates', [])
+                for index, candidate in enumerate(previous):
+                    if index in used_previous:
+                        continue
+                    old = candidate['bbox']
+                    intersection = max(0, min(box[2], old[2]) - max(box[0], old[0])) * max(0, min(box[3], old[3]) - max(box[1], old[1]))
+                    union = w * h + (old[2] - old[0]) * (old[3] - old[1]) - intersection
+                    if intersection / max(union, 1) >= 0.2:
+                        hits = candidate['hits'] + 1
+                        used_previous.add(index)
+                        break
+                current.append({'bbox': box, 'hits': min(hits, 100)})
+                if hits >= self.surface_min_frames:
                     events.append(AnomalyEvent(
                         type="road_anomaly",
                         severity="warning",
-                        confidence=min(0.85, 0.4 + area / 5000),
-                        details=f"Pothole at ({x}, {y}), area={area:.0f}px²",
-                        bbox=[float(x), float(y), float(x + w), float(y + h)],
+                        confidence=0.35,  # Heuristic score, not calibrated probability.
+                        details=f"Possible surface defect/shadow at ({x}, {y}); persistent {hits} frames, not a confirmed pothole",
+                        bbox=box,
                     ))
+            self._surface_candidates = current
 
         except Exception as e:
+            self._surface_candidates = []
             logger.error(f"Road anomaly detection failed: {e}")
 
         return events
@@ -378,3 +425,4 @@ class AnomalyEventDetector:
         """Clear all internal state."""
         self._wrong_side_counters.clear()
         self._prev_positions.clear()
+        self._surface_candidates = []

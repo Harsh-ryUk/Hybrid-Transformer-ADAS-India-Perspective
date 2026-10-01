@@ -8,9 +8,39 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.benchmark_pipeline import benchmark_device, synchronize
+from scripts.benchmark_pipeline import benchmark_device, configure_profile, source_frames, synchronize
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_configured_profile_preserves_quality_settings():
+    import copy
+    import yaml
+    config = yaml.safe_load((ROOT / 'configs/dashcam_quality.yaml').read_text())
+    original = copy.deepcopy(config)
+    assert configure_profile(config, 'configured') == original
+    config['zero_shot'].update(enabled=True, background=True)
+    with pytest.raises(ValueError, match='foreground'):
+        configure_profile(config, 'configured')
+
+
+def test_native_video_keeps_portrait_dimensions_and_stops_at_eof(tmp_path):
+    import cv2
+    import numpy as np
+    path = tmp_path / 'portrait.avi'
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*'MJPG'), 15, (32, 64))
+    assert writer.isOpened()
+    try:
+        for value in (10, 50, 90):
+            writer.write(np.full((64, 32, 3), value, np.uint8))
+    finally:
+        writer.release()
+    frames, metadata = source_frames(str(path), 1280, 720, native_resolution=True)
+    assert metadata['original_resolution'] == metadata['processed_resolution'] == [32, 64]
+    assert metadata['reported_frame_count'] == 3
+    assert metadata['source_fps'] == pytest.approx(15)
+    assert metadata['requested_resolution'] is None
+    assert [frame.shape for frame in frames] == [(64, 32, 3)] * 3
 
 
 def test_explicit_cuda_never_silently_falls_back():

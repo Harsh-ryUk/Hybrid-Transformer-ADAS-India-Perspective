@@ -33,6 +33,10 @@ benchmark_results.csv
 *.log
 !benchmarks/colab_t4_sample_20260930T202529Z/setup.log
 !benchmarks/colab_t4_sample_20260930T202529Z/benchmark.log
+!benchmarks/colab_t4_video_20261001/baseline/benchmark.log
+!benchmarks/colab_t4_video_20261001/baseline/setup.log
+!benchmarks/colab_t4_video_20261001/optimized/benchmark.log
+!benchmarks/colab_t4_video_20261001/optimized/tests.log
 
 # IDE
 .vscode/

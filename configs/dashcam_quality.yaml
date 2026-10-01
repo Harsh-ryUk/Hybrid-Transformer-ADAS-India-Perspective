@@ -1,0 +1,29 @@
+# Clip-specific research profile; NOT the historical benchmark configuration.
+system:
+  name: RoadSense-India
+  device: cpu
+detection:
+  model_path: yolov8n.pt
+  confidence_threshold: 0.35
+  iou_threshold: 0.45
+  input_size: [640, 640]
+zero_shot:
+  enabled: false
+segmentation:
+  model_name: nvidia/segformer-b0-finetuned-ade-512-512
+  input_size: [512, 512]
+  road_class_ids: [6]
+  # For the supplied vertical Short only: exclude embedded borders and bonnet.
+  # Reset to [0, 0, 1, 1] and inspect for a different camera/video.
+  frame_roi: [0, 0.125, 1, 0.78]
+  roi_top_fraction: 0.45
+  min_road_coverage: 0.02
+tracking:
+  max_age: 30
+  min_hits: 3
+  iou_threshold: 0.3
+anomaly:
+  wrong_side_enabled: false  # Image motion alone cannot establish oncoming traffic.
+  surface_min_frames: 3
+  pothole_contrast_threshold: 40
+  pothole_min_area: 500

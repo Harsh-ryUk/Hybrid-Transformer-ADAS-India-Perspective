@@ -40,6 +40,7 @@ class SceneContext:
     # Lane information
     lane_center_offset: float = 0.0     # Pixels from lane center (negative=left)
     lane_detected: bool = False
+    road_observed: Optional[bool] = None  # None preserves external legacy callers; pipeline supplies a bool.
     drivable_mask: Optional[np.ndarray] = None
     # Anomaly events from event detector
     active_anomalies: List[Dict] = None  # type, severity, details
@@ -244,6 +245,16 @@ class RuleBasedDecisionEngine:
                 active_events=["obstacle_ahead"],
             )
 
+        if scene.road_observed is False:
+            return DecisionOutput(
+                action=ActionType.SLOW_DOWN,
+                control=VehicleControl(throttle=0.0, brake=0.15),
+                confidence=0.0,
+                reason='Road region unknown - perception degraded (simulation only)',
+                severity=SeverityLevel.WARNING,
+                active_events=['road_perception_unknown'],
+            )
+
         # ── Rule 6: Lane Discipline ──
         steering = self._compute_lane_steering(scene)
 
@@ -255,7 +266,7 @@ class RuleBasedDecisionEngine:
                 steering=steering,
             ),
             confidence=0.9,
-            reason="Clear road — cruising",
+            reason="No configured rule triggered - not a safety clearance",
             severity=SeverityLevel.INFO,
             active_events=active_events,
         )

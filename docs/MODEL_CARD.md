@@ -21,7 +21,9 @@ safety or Level 4 autonomy. Legacy names remain for source/API compatibility.
 RGB preprocessing follows the official
 [SegFormer input convention](https://huggingface.co/docs/transformers/model_doc/segformer).
 Road-mask coverage is a geometric fraction, not calibrated confidence.
-Capture input is first reduced to 256×144 even for the 512×512 network profile.
+Historical benchmark code reduced capture input to 256×144 before network resizing.
+Current code preserves source detail until the configured network resize and
+supports an explicit crop. See [road-quality behaviour](ROAD_QUALITY.md).
 
 ## Data and measurement
 
@@ -40,6 +42,21 @@ masks/boundaries. This is an observation, not an accuracy comparison. The sample
 does not exercise every anomaly branch or traffic-light state.
 
 ## Failure modes
+
+The current quality profile has a separate [moving-video T4 experiment](../benchmarks/colab_t4_video_20261001/README.md):
+6.946 → 11.050 FPS, p95 wall latency 207.140 → 132.349 ms, over 1782 measured
+frames per revision. Bounded-region surface filtering reduced CPU work with
+matching recorded per-frame counts, coverage and actions. This profile disables
+OWL and uses a clip-specific crop. Neither run met the source's 59.94 FPS budget.
+The unannotated clip does not establish detection, road, tracking or defect accuracy.
+
+Unknown road regions now prevent the pipeline's default cruise rule. This is an
+experimental simulation policy, not a vehicle-safe fallback. Lane markings remain
+unvalidated; road-region boundaries are not used as lane steering targets.
+Surface contrast candidates need temporal confirmation and exclude tracked
+objects, but shadows, reflections and camera motion can still fool the heuristic.
+Wrong-side image-motion inference is disabled by default in the L4 pipeline;
+ego-motion compensation and road-direction context are not implemented.
 
 - COCO pretraining does not establish recognition of auto-rickshaws/overloaded vehicles.
 - Road masks and fitted edges can fail under padding, lighting, occlusion or domain shift.
